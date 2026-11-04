@@ -1,9 +1,11 @@
 # XML to Arrow milestones
 
 Implement one reviewable PR at a time, in dependency order. This checkout
-implements PRs 1–2. No CI or CLI is planned.
+implements milestones 1–3. Fixture-only PRs can land between functional
+milestones, so milestone numbers are independent of GitHub PR numbers.
+No CI or CLI is planned.
 
-| PR | Deliverable | Acceptance |
+| Milestone | Deliverable | Acceptance |
 | --- | --- | --- |
 | 1 | Workspace, explicit scalar schema, field paths, atomic batch builder, projection | All four scalar types, missing/empty values, references/CDATA, projection order, zero-column row counts, and failed-append recovery pass. |
 | 2 | Nested Struct/List, namespace URI matching, xsi:nil | Empty lists, absent parents, nested nulls, repeated data, and mixed-content rules pass. |
@@ -14,5 +16,5 @@ implements PRs 1–2. No CI or CLI is planned.
 
 Each PR includes its own tests and documentation. Run formatting, clippy, and
 workspace tests locally. Core conversion stays in `xml-arrow`; storage and async
-input handling belong to `xml-io` starting in PR 3. No empty placeholder I/O crate
-is added in PR 1. Raw XML retention, if introduced, is opt-in.
+input handling belong to `xml-io` starting in milestone 3. Raw XML retention,
+if introduced, is opt-in.

@@ -4,8 +4,8 @@ A Rust library for converting XML records into Apache Arrow `RecordBatch` values
 Column names, XML paths, types, and nullability are explicit. Conversion performs
 no filesystem or network I/O.
 
-This checkout implements **PRs 1–2: scalar and nested conversion with an explicit schema**.
-See [MILESTONES.md](MILESTONES.md) for the remaining PRs.
+This checkout implements **milestones 1–3: explicit scalar/nested conversion and
+asynchronous document reading**. See [MILESTONES.md](MILESTONES.md) for the roadmap.
 
 ## Convert records
 
@@ -93,12 +93,12 @@ scalars, structs, or other lists.
 - Predefined/numeric XML references, CDATA, Unicode, and XML 1.0 line endings.
 - Selected scalar elements cannot repeat or contain child elements.
 - Unmapped content is ignored after XML parsing and input-contract checks.
-- XML parsing, entity decoding, and normalization are delegated to `roxmltree`.
+- Record conversion, entity decoding, and normalization use `roxmltree`.
 - Inputs are decoded Rust strings; declaration metadata does not change decoding.
 - Namespace URI matching and nullable elements via `xsi:nil`.
 - DTDs and custom entities are not supported.
-- No automatic schema inference, record-path reader, storage
-  integration, CLI, CI, or built-in IPC/Parquet export at this stage.
+- No automatic schema inference, storage integration, CLI, CI, or built-in
+  IPC/Parquet export at this stage.
 
 Batch size limits **rows, not bytes**. Callers supply complete records in memory;
 the converter builds a read-only tree for one record during conversion, then
@@ -107,7 +107,42 @@ record-size or depth limits. `Utf8` and `List` use 32-bit offsets; exceeding the
 format limits returns an error before any columns are changed.
 
 See the [schema contract](docs/schema.md) for exact conversion and error behavior.
-Future asynchronous and OpenDAL APIs will live in a separate `xml-io` crate.
+
+## Read XML documents asynchronously
+
+`xml-io` selects records by an absolute element path and converts them with
+`xml-arrow`. Input implements `futures::io::AsyncBufRead + Unpin + Send`;
+no Tokio runtime is required.
+
+```rust
+use arrow_schema::DataType;
+use futures_util::io::Cursor;
+use xml_arrow::{XmlField, XmlSchema};
+use xml_io::{ReaderOptions, XmlReader};
+
+let schema = XmlSchema::new(vec![
+    XmlField::new("id", "@id", DataType::Int64, false),
+])?;
+let mut reader = XmlReader::new(
+    Cursor::new(b"<rows><row id='1'/><row id='2'/></rows>"),
+    schema,
+    "/rows/row",
+    ReaderOptions { batch_size: 1, ..Default::default() },
+)?;
+// Inside an async context:
+while let Some(batch) = reader.next_batch().await? {
+    assert_eq!(batch.num_rows(), 1);
+}
+```
+
+Use `into_stream()` for a `Send` stream of batches. Record-path prefixes use the
+schema's namespace bindings and match by URI. The reader preserves inherited
+namespaces when extracting records. Cancelling a pending `next_batch()` call
+preserves parsing and pending rows; the first error ends the reader.
+
+Defaults are 1024 rows, 8 MiB per record/event, 64 MiB of serialized input records
+per batch, and depth 128. These byte limits bound input accumulation; Arrow
+allocations depend on the schema. See the [reader contract](docs/reading.md).
 
 ## Development
 
@@ -124,6 +159,7 @@ read those complete XML files and verify their Arrow output offline:
 
 ```sh
 cargo test -p xml-arrow --test real_xml
+cargo test -p xml-io --test real_xml
 ```
 
 Licensed under [MIT](LICENSE).

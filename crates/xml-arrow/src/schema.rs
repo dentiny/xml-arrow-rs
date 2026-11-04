@@ -137,6 +137,11 @@ impl XmlSchema {
         Arc::clone(&self.arrow)
     }
 
+    /// Namespace URI bound to a schema path prefix, including predefined `xml`.
+    pub fn namespace_uri(&self, prefix: &str) -> Option<&str> {
+        self.namespaces.get(prefix).map(String::as_str)
+    }
+
     pub(crate) fn project(&self, projection: &[usize]) -> Result<Self> {
         let mut seen = HashSet::new();
         let mut fields = Vec::with_capacity(projection.len());
