@@ -5,7 +5,9 @@ use arrow_array::{
 use arrow_schema::SchemaRef;
 
 use crate::{
-    builders::append, parse::parse, validation::validate_capacity, Error, Result, XmlSchema,
+    builders::{append, validate_capacity},
+    parse::parse,
+    Error, Result, XmlSchema,
 };
 
 /// Accumulates complete XML records into Arrow batches without performing I/O.

@@ -10,6 +10,8 @@ pub enum Error {
     Configuration(String),
     /// XML syntax error, including the parser's source location.
     Xml(roxmltree::Error),
+    /// Valid XML uses a feature not supported by the converter.
+    UnsupportedXml(&'static str),
     /// A mapped field is missing, repeated, structurally invalid, or ill-typed.
     Field {
         /// Output column name.
@@ -30,6 +32,7 @@ impl fmt::Display for Error {
         match self {
             Self::Configuration(message) => write!(f, "invalid configuration: {message}"),
             Self::Xml(source) => write!(f, "XML: {source}"),
+            Self::UnsupportedXml(message) => write!(f, "unsupported XML: {message}"),
             Self::Field {
                 name,
                 path,

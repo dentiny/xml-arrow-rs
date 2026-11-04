@@ -1,75 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use arrow_array::builder::{ArrayBuilder, ListBuilder, StringBuilder, StructBuilder};
 use arrow_schema::DataType;
 
-use crate::{parse::Value, Error, Result, XmlField};
-
-// All items in a row share each nested Arrow builder. Check their cumulative
-// offsets together before append, including for lists of lists or structs.
-pub(crate) fn validate_capacity(
-    builder: &dyn ArrayBuilder,
-    field: &XmlField,
-    values: &[&Value],
-) -> Result<()> {
-    match field.field.data_type() {
-        DataType::Utf8 => {
-            let builder = builder.as_any().downcast_ref::<StringBuilder>().unwrap();
-            let bytes = values
-                .iter()
-                .filter_map(|value| match value {
-                    Value::Text(text) => Some(text.len()),
-                    _ => None,
-                })
-                .fold(0usize, usize::saturating_add);
-            if builder.values_slice().len().saturating_add(bytes) > i32::MAX as usize {
-                return Err(
-                    field.error("Utf8 offset limit exceeded; use a smaller batch or record")
-                );
-            }
-        }
-        DataType::Struct(_) => {
-            let builder = builder.as_any().downcast_ref::<StructBuilder>().unwrap();
-            for (index, (builder, child)) in builder
-                .field_builders()
-                .iter()
-                .zip(&field.children)
-                .enumerate()
-            {
-                let children: Vec<_> = values
-                    .iter()
-                    .filter_map(|value| match value {
-                        Value::Struct(children) => Some(&children[index]),
-                        _ => None,
-                    })
-                    .collect();
-                validate_capacity(builder.as_ref(), child, &children)?;
-            }
-        }
-        DataType::List(_) => {
-            let builder = builder
-                .as_any()
-                .downcast_ref::<ListBuilder<Box<dyn ArrayBuilder>>>()
-                .unwrap();
-            let children: Vec<_> = values
-                .iter()
-                .filter_map(|value| match value {
-                    Value::List(children) => Some(children),
-                    _ => None,
-                })
-                .flatten()
-                .collect();
-            if builder.values_ref().len().saturating_add(children.len()) > i32::MAX as usize {
-                return Err(
-                    field.error("List offset limit exceeded; use a smaller batch or record")
-                );
-            }
-            validate_capacity(builder.values_ref().as_ref(), &field.children[0], &children)?;
-        }
-        _ => {}
-    }
-    Ok(())
-}
+use crate::{Error, Result, XmlField};
 
 pub(crate) fn validate_fields(
     fields: &[XmlField],
