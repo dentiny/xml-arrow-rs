@@ -24,3 +24,42 @@ fn rejects_invalid_batch_size_and_projection() {
     assert!(XmlBatchBuilder::new_projected(schema.clone(), 1, &[1]).is_err());
     assert!(XmlBatchBuilder::new_projected(schema, 1, &[0, 0]).is_err());
 }
+
+#[test]
+fn rejects_invalid_nested_mappings_and_namespace_bindings() {
+    for field in [
+        XmlField::list(
+            "values",
+            "@values",
+            true,
+            XmlField::new("item", "v", Utf8, false),
+        ),
+        XmlField::structure(
+            "record",
+            ".",
+            false,
+            vec![
+                XmlField::new("id", "@id", Int64, false),
+                XmlField::new("id", "id", Int64, true),
+            ],
+        ),
+        XmlField::new("value", "unknown:value", Utf8, true),
+        XmlField::new(
+            "values",
+            ".",
+            arrow_schema::DataType::List(std::sync::Arc::new(arrow_schema::Field::new(
+                "item", Utf8, true,
+            ))),
+            true,
+        ),
+    ] {
+        assert!(XmlSchema::new(vec![field]).is_err());
+    }
+    for bindings in [
+        vec![("p", "urn:a"), ("p", "urn:b")],
+        vec![("xml", "urn:wrong")],
+        vec![("p", "")],
+    ] {
+        assert!(XmlSchema::with_namespaces(vec![], &bindings).is_err());
+    }
+}

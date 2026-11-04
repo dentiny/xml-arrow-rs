@@ -1,47 +1,14 @@
-use std::sync::Arc;
-
 use arrow_array::{
-    builder::{BooleanBuilder, Float64Builder, Int64Builder, StringBuilder},
-    ArrayRef, RecordBatch, RecordBatchOptions,
+    builder::{make_builder, ArrayBuilder},
+    RecordBatch, RecordBatchOptions,
 };
 use arrow_schema::SchemaRef;
 
 use crate::{
-    parse::{parse, Scalar},
+    builders::{append, validate_capacity},
+    parse::parse,
     Error, Result, XmlSchema,
 };
-
-enum Column {
-    Text(StringBuilder),
-    Boolean(BooleanBuilder),
-    Integer(Int64Builder),
-    Float(Float64Builder),
-}
-
-impl Column {
-    fn append(&mut self, value: Option<Scalar>) {
-        match (self, value) {
-            (Self::Text(b), Some(Scalar::Text(v))) => b.append_value(v),
-            (Self::Boolean(b), Some(Scalar::Boolean(v))) => b.append_value(v),
-            (Self::Integer(b), Some(Scalar::Integer(v))) => b.append_value(v),
-            (Self::Float(b), Some(Scalar::Float(v))) => b.append_value(v),
-            (Self::Text(b), None) => b.append_null(),
-            (Self::Boolean(b), None) => b.append_null(),
-            (Self::Integer(b), None) => b.append_null(),
-            (Self::Float(b), None) => b.append_null(),
-            _ => unreachable!("conversion uses the same validated schema as the builders"),
-        }
-    }
-
-    fn finish(&mut self) -> ArrayRef {
-        match self {
-            Self::Text(b) => Arc::new(b.finish()),
-            Self::Boolean(b) => Arc::new(b.finish()),
-            Self::Integer(b) => Arc::new(b.finish()),
-            Self::Float(b) => Arc::new(b.finish()),
-        }
-    }
-}
 
 /// Accumulates complete XML records into Arrow batches without performing I/O.
 ///
@@ -50,7 +17,7 @@ impl Column {
 /// The row limit does not bound record size or total bytes in memory.
 pub struct XmlBatchBuilder {
     schema: XmlSchema,
-    columns: Vec<Column>,
+    columns: Vec<Box<dyn ArrayBuilder>>,
     batch_size: usize,
     rows: usize,
 }
@@ -61,17 +28,10 @@ impl XmlBatchBuilder {
         if batch_size == 0 {
             return Err(Error::Configuration("batch_size must be positive".into()));
         }
-        use arrow_schema::DataType;
         let columns = schema
             .fields
             .iter()
-            .map(|f| match f.field.data_type() {
-                DataType::Utf8 => Column::Text(StringBuilder::new()),
-                DataType::Boolean => Column::Boolean(BooleanBuilder::new()),
-                DataType::Int64 => Column::Integer(Int64Builder::new()),
-                DataType::Float64 => Column::Float(Float64Builder::new()),
-                _ => unreachable!("schema types are validated on construction"),
-            })
+            .map(|f| make_builder(f.field.data_type(), batch_size.min(1024)))
             .collect();
         Ok(Self {
             schema,
@@ -102,20 +62,13 @@ impl XmlBatchBuilder {
         if self.is_full() {
             return Err(Error::BatchFull);
         }
-        let row = parse(input, &self.schema.fields)?;
-        // Check every Utf8 offset before mutating any column. Arrow uses i32
-        // offsets and its string builder would otherwise panic on overflow.
+        let row = parse(input, &self.schema)?;
+        // Check all nested offsets before mutating any column.
         for ((column, value), field) in self.columns.iter().zip(&row).zip(&self.schema.fields) {
-            if let (Column::Text(builder), Some(Scalar::Text(value))) = (column, value) {
-                if builder.values_slice().len().saturating_add(value.len()) > i32::MAX as usize {
-                    return Err(
-                        field.error("Utf8 offset limit exceeded; use a smaller batch or record")
-                    );
-                }
-            }
+            validate_capacity(column.as_ref(), field, &[value])?;
         }
-        for (column, value) in self.columns.iter_mut().zip(row) {
-            column.append(value);
+        for ((column, value), field) in self.columns.iter_mut().zip(row).zip(&self.schema.fields) {
+            append(column.as_mut(), field, value);
         }
         self.rows += 1;
         Ok(())
@@ -146,7 +99,11 @@ impl XmlBatchBuilder {
         if self.is_empty() {
             return Ok(None);
         }
-        let columns = self.columns.iter_mut().map(Column::finish).collect();
+        let columns = self
+            .columns
+            .iter_mut()
+            .map(|column| column.finish())
+            .collect();
         let options = RecordBatchOptions::new().with_row_count(Some(self.rows));
         let batch = RecordBatch::try_new_with_options(self.schema(), columns, &options)?;
         self.rows = 0;
