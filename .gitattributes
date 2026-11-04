@@ -1,0 +1,2 @@
+# Preserve the exact bytes of pinned upstream XML snapshots.
+testdata/*.xml -text
