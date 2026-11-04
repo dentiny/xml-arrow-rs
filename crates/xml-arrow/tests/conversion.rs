@@ -391,8 +391,6 @@ fn unsupported_or_broken_xml_is_rejected_even_without_columns() {
         "<1invalid/>",
         "<r 1invalid='a'/>",
         "<r/>\u{a0}",
-        "<?xml version='1.1'?><r/>",
-        "<?xml version='1.0' encoding='UTF-16'?><r/>",
         "<r><?xml version='1.0'?></r>",
     ] {
         let mut b = builder(vec![]);
@@ -427,5 +425,71 @@ fn utf8_bom_is_accepted_with_and_without_declaration() {
         let mut b = builder(vec![]);
         b.append_xml(xml).unwrap();
         assert_eq!(b.len(), 1);
+    }
+}
+
+#[test]
+fn declaration_metadata_does_not_redecode_rust_strings() {
+    for declaration in [
+        "<?xml version='1.1'?>",
+        "<?xml version='1.0' encoding='UTF-16'?>",
+    ] {
+        let mut b = builder(vec![field("text", ".", DataType::Utf8, false)]);
+        b.append_xml(&format!("{declaration}<r>已经解码</r>"))
+            .unwrap();
+        let batch = b.flush().unwrap().unwrap();
+        assert_eq!(
+            batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+                .value(0),
+            "已经解码"
+        );
+    }
+}
+
+#[test]
+fn descendant_paths_search_all_container_branches() {
+    let mut b = builder(vec![
+        field("value", "a/b", DataType::Utf8, true),
+        field("id", "a/@id", DataType::Int64, true),
+    ]);
+    b.append_xml(r#"<r><a/><a id="7"><b>found</b></a></r>"#)
+        .unwrap();
+    assert!(b
+        .append_xml(r#"<r><a><b>first</b></a><a><b>second</b></a></r>"#)
+        .is_err());
+    let batch = b.flush().unwrap().unwrap();
+    assert_eq!(batch.num_rows(), 1);
+    assert_eq!(
+        batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+            .value(0),
+        "found"
+    );
+    assert_eq!(
+        batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .value(0),
+        7
+    );
+}
+
+#[test]
+fn syntax_errors_retain_parser_location_and_source() {
+    let mut b = builder(vec![]);
+    let error = b.append_xml("<r>\n<value></r>").unwrap_err();
+    assert!(std::error::Error::source(&error).is_some());
+    match error {
+        Error::Xml(source) => assert_eq!(source.pos().row, 2),
+        other => panic!("expected a parser error, got {other}"),
     }
 }

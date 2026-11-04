@@ -5,13 +5,10 @@ use std::fmt;
 pub enum Error {
     /// An unsupported schema, invalid path, projection, or batch size.
     Configuration(String),
-    /// XML could not be read under the supported input contract.
-    Xml {
-        /// Byte position reached by the XML reader (not necessarily the start of the error).
-        position: u64,
-        /// Explanation of the failure.
-        message: String,
-    },
+    /// XML syntax error, including the parser's source location.
+    Xml(roxmltree::Error),
+    /// Valid XML uses a feature not supported by the converter.
+    UnsupportedXml(&'static str),
     /// A mapped field is missing, repeated, structurally invalid, or ill-typed.
     Field {
         /// Output column name.
@@ -27,20 +24,12 @@ pub enum Error {
     Arrow(arrow_schema::ArrowError),
 }
 
-impl Error {
-    pub(crate) fn xml(position: u64, message: impl ToString) -> Self {
-        Self::Xml {
-            position,
-            message: message.to_string(),
-        }
-    }
-}
-
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Configuration(message) => write!(f, "invalid configuration: {message}"),
-            Self::Xml { position, message } => write!(f, "XML at byte {position}: {message}"),
+            Self::Xml(source) => write!(f, "XML: {source}"),
+            Self::UnsupportedXml(message) => write!(f, "unsupported XML: {message}"),
             Self::Field {
                 name,
                 path,
@@ -55,9 +44,16 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Xml(source) => Some(source),
             Self::Arrow(source) => Some(source),
             _ => None,
         }
+    }
+}
+
+impl From<roxmltree::Error> for Error {
+    fn from(source: roxmltree::Error) -> Self {
+        Self::Xml(source)
     }
 }
 

@@ -137,15 +137,8 @@ fn valid_path(path: &str) -> bool {
     })
 }
 
-pub(crate) fn valid_name(name: &str) -> bool {
-    // XML 1.0 Fifth Edition NCName (without namespace prefixes).
-    fn start(c: char) -> bool {
-        matches!(c, 'A'..='Z' | '_' | 'a'..='z' | '\u{C0}'..='\u{D6}' |
-            '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}' | '\u{370}'..='\u{37D}' |
-            '\u{37F}'..='\u{1FFF}' | '\u{200C}'..='\u{200D}' | '\u{2070}'..='\u{218F}' |
-            '\u{2C00}'..='\u{2FEF}' | '\u{3001}'..='\u{D7FF}' | '\u{F900}'..='\u{FDCF}' |
-            '\u{FDF0}'..='\u{FFFD}' | '\u{10000}'..='\u{EFFFF}')
-    }
-    let mut chars = name.chars();
-    chars.next().is_some_and(start) && chars.all(|c| start(c) || matches!(c, '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}'))
+fn valid_name(name: &str) -> bool {
+    !name.contains(':')
+        && roxmltree::Document::parse(&format!("<{name}/>"))
+            .is_ok_and(|doc| doc.root_element().tag_name().name() == name)
 }

@@ -8,13 +8,15 @@ whitespace, comments, processing instructions, and a leading XML declaration
 are allowed. Multiple root elements, text outside the root, truncated input,
 mismatched tags, and duplicate attributes fail.
 
-Inputs are UTF-8 XML 1.0. A declaration may specify UTF-8 (case insensitive).
-XML 1.1, non-UTF-8 encoding declarations, DTDs, and custom entity references are
-rejected. This converter uses quick-xml and applies its documented parser checks;
-it is not an XSD or general XML conformance validator.
+Inputs are already-decoded Rust strings. `roxmltree` handles XML syntax,
+character/name validation, references, and text normalization. Its default
+parsing options reject DTDs; custom entities are not supported. XML declaration
+version/encoding values are metadata and do not trigger decoding or select a
+different conversion mode. This is not an XSD validator.
 
-Namespace declarations and prefixed element/attribute names are rejected until
+User namespace bindings and namespaced elements/attributes are rejected until
 namespace URI matching is implemented in PR 2. They are never silently stripped.
+An unused declaration of the predefined `xml` binding is harmless metadata.
 
 ## Paths
 
@@ -81,7 +83,7 @@ Zero-column batches retain the number of successfully appended records.
 The entire selected row is parsed and converted before mutating any Arrow
 column. Failed appends preserve all prior rows, consume no capacity, and leave
 the builder usable. Field errors identify the output name and XML path. XML
-errors report a reader byte position; it may point after the offending token.
+syntax errors retain the parser's original error and line/column position.
 No source URI or global record number is inferred by this in-memory API.
 
 The cumulative byte count of each `Utf8` column is checked before appending.

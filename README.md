@@ -60,13 +60,16 @@ checked only for selected columns.
 - Predefined/numeric XML references, CDATA, Unicode, and XML 1.0 line endings.
 - Selected scalar elements cannot repeat or contain child elements.
 - Unmapped content is ignored after XML parsing and input-contract checks.
-- UTF-8 XML 1.0 only; DTDs, custom entities, and namespaces are rejected.
+- XML parsing, entity decoding, and normalization are delegated to `roxmltree`.
+- Inputs are decoded Rust strings; declaration metadata does not change decoding.
+- DTDs, custom entities, and namespace mapping are not supported.
 - No nested Arrow types, automatic schema inference, record-path reader, storage
   integration, CLI, CI, or built-in IPC/Parquet export at this stage.
 
 Batch size limits **rows, not bytes**. Callers supply complete records in memory;
-the converter retains selected text during conversion and the pending Arrow
-columns. This stage does not enforce record-size or depth limits. `Utf8` uses
+the converter builds a read-only tree for one record during conversion, then
+retains only the pending Arrow columns. This stage does not enforce application
+record-size or depth limits. `Utf8` uses
 Arrow's 32-bit string offsets; appends exceeding that format limit return an error.
 
 See the [schema contract](docs/schema.md) for exact conversion and error behavior.

@@ -9,7 +9,7 @@ readme = "../../README.md"
 [dependencies]
 arrow-array.workspace = true
 arrow-schema.workspace = true
-quick-xml.workspace = true
+roxmltree.workspace = true
 
 [[example]]
 name = "convert"

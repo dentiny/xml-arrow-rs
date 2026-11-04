@@ -10,4 +10,4 @@ license = "MIT"
 [workspace.dependencies]
 arrow-array = "58"
 arrow-schema = "58"
-quick-xml = { version = "0.41", default-features = false }
+roxmltree = "0.21"
