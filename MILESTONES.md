@@ -1,7 +1,7 @@
 # XML to Arrow milestones
 
 Implement one reviewable PR at a time, in dependency order. This checkout
-implements PR 1. No CI or CLI is planned.
+implements PRs 1–2. No CI or CLI is planned.
 
 | PR | Deliverable | Acceptance |
 | --- | --- | --- |

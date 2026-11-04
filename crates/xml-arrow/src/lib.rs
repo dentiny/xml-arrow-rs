@@ -21,8 +21,28 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! Nested child paths are relative to their selected parent element:
+//!
+//! ```
+//! # fn main() -> xml_arrow::Result<()> {
+//! use arrow_schema::DataType;
+//! use xml_arrow::{XmlBatchBuilder, XmlField, XmlSchema};
+//! let schema = XmlSchema::new(vec![XmlField::list(
+//!     "people", "people", false,
+//!     XmlField::structure("item", "person", false, vec![
+//!         XmlField::new("id", "@id", DataType::Int64, false),
+//!     ]),
+//! )])?;
+//! let mut builder = XmlBatchBuilder::new(schema, 128)?;
+//! builder.append_xml(r#"<r><people><person id="1"/><person id="2"/></people></r>"#)?;
+//! assert_eq!(builder.flush()?.unwrap().num_rows(), 1);
+//! # Ok(())
+//! # }
+//! ```
 
 mod batch;
+mod builders;
 mod error;
 mod parse;
 mod schema;
