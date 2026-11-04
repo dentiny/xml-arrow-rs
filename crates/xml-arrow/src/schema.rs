@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 
-use crate::Error;
+use crate::{Error, Result};
 
 /// One scalar Arrow column and its path relative to the XML record element.
 #[derive(Clone, Debug)]
@@ -60,7 +60,7 @@ impl XmlSchema {
     /// Supported types are `Utf8`, `Boolean`, `Int64`, and `Float64`.
     /// Paths use unqualified XML names and `/`, with an optional terminal `@name`.
     /// Namespace matching and XPath expressions are not supported in this stage.
-    pub fn new(fields: Vec<XmlField>) -> Result<Self, Error> {
+    pub fn new(fields: Vec<XmlField>) -> Result<Self> {
         let mut names = HashSet::new();
         for field in &fields {
             if field.field.name().is_empty() || !names.insert(field.field.name()) {
@@ -101,7 +101,7 @@ impl XmlSchema {
         Arc::clone(&self.arrow)
     }
 
-    pub(crate) fn project(&self, projection: &[usize]) -> Result<Self, Error> {
+    pub(crate) fn project(&self, projection: &[usize]) -> Result<Self> {
         let mut seen = HashSet::new();
         let mut fields = Vec::with_capacity(projection.len());
         for &index in projection {

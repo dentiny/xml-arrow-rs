@@ -5,6 +5,7 @@
 //! element. Paths are relative to that element. This crate performs no I/O.
 //!
 //! ```
+//! # fn main() -> xml_arrow::Result<()> {
 //! use arrow_schema::DataType;
 //! use xml_arrow::{XmlBatchBuilder, XmlField, XmlSchema};
 //!
@@ -17,7 +18,8 @@
 //! let batch = builder.flush()?.unwrap();
 //! assert_eq!(batch.num_rows(), 1);
 //! assert_eq!(batch.num_columns(), 2);
-//! # Ok::<(), xml_arrow::Error>(())
+//! # Ok(())
+//! # }
 //! ```
 
 mod batch;
@@ -26,5 +28,5 @@ mod parse;
 mod schema;
 
 pub use batch::XmlBatchBuilder;
-pub use error::Error;
+pub use error::{Error, Result};
 pub use schema::{XmlField, XmlSchema};

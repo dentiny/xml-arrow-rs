@@ -1,5 +1,8 @@
 use std::fmt;
 
+/// A result using this crate's [`Error`] type.
+pub type Result<T> = std::result::Result<T, Error>;
+
 /// Configuration, XML parsing, scalar conversion, or batch construction failure.
 #[derive(Debug)]
 pub enum Error {

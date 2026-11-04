@@ -1,6 +1,6 @@
 use roxmltree::{Document, Node};
 
-use crate::{Error, XmlField};
+use crate::{Error, Result, XmlField};
 
 pub(crate) enum Scalar {
     Text(String),
@@ -9,7 +9,7 @@ pub(crate) enum Scalar {
     Float(f64),
 }
 
-pub(crate) fn parse(input: &str, fields: &[XmlField]) -> Result<Vec<Option<Scalar>>, Error> {
+pub(crate) fn parse(input: &str, fields: &[XmlField]) -> Result<Vec<Option<Scalar>>> {
     let document = Document::parse(input)?;
     if document.descendants().any(|node| {
         node.is_element()
@@ -30,7 +30,7 @@ pub(crate) fn parse(input: &str, fields: &[XmlField]) -> Result<Vec<Option<Scala
         .collect()
 }
 
-fn extract(root: Node<'_, '_>, field: &XmlField) -> Result<Option<String>, Error> {
+fn extract(root: Node<'_, '_>, field: &XmlField) -> Result<Option<String>> {
     let mut nodes = vec![root];
     for part in field.path.split('/') {
         if part == "." {
@@ -67,7 +67,7 @@ fn extract(root: Node<'_, '_>, field: &XmlField) -> Result<Option<String>, Error
     ))
 }
 
-fn convert(field: &XmlField, value: Option<&str>) -> Result<Option<Scalar>, Error> {
+fn convert(field: &XmlField, value: Option<&str>) -> Result<Option<Scalar>> {
     use arrow_schema::DataType;
     let Some(value) = value else {
         return if field.field.is_nullable() {

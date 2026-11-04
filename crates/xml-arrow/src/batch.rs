@@ -8,7 +8,7 @@ use arrow_schema::SchemaRef;
 
 use crate::{
     parse::{parse, Scalar},
-    Error, XmlSchema,
+    Error, Result, XmlSchema,
 };
 
 enum Column {
@@ -57,7 +57,7 @@ pub struct XmlBatchBuilder {
 
 impl XmlBatchBuilder {
     /// Creates a builder for all columns. `batch_size` must be positive.
-    pub fn new(schema: XmlSchema, batch_size: usize) -> Result<Self, Error> {
+    pub fn new(schema: XmlSchema, batch_size: usize) -> Result<Self> {
         if batch_size == 0 {
             return Err(Error::Configuration("batch_size must be positive".into()));
         }
@@ -90,7 +90,7 @@ impl XmlBatchBuilder {
         schema: XmlSchema,
         batch_size: usize,
         projection: &[usize],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self> {
         Self::new(schema.project(projection)?, batch_size)
     }
 
@@ -98,7 +98,7 @@ impl XmlBatchBuilder {
     /// whitespace, comments, processing instructions, and a leading XML declaration.
     ///
     /// Failure leaves previously appended rows intact and this builder reusable.
-    pub fn append_xml(&mut self, input: &str) -> Result<(), Error> {
+    pub fn append_xml(&mut self, input: &str) -> Result<()> {
         if self.is_full() {
             return Err(Error::BatchFull);
         }
@@ -142,7 +142,7 @@ impl XmlBatchBuilder {
     }
 
     /// Returns pending rows and resets the builder. Returns `None` when empty.
-    pub fn flush(&mut self) -> Result<Option<RecordBatch>, Error> {
+    pub fn flush(&mut self) -> Result<Option<RecordBatch>> {
         if self.is_empty() {
             return Ok(None);
         }
