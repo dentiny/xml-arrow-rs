@@ -1,0 +1,16 @@
+[package]
+name = "xml-arrow"
+description = "Explicit-schema XML record conversion to Apache Arrow batches"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+readme = "../../README.md"
+
+[dependencies]
+arrow-array.workspace = true
+arrow-schema.workspace = true
+roxmltree.workspace = true
+
+[[example]]
+name = "convert"
+path = "../../examples/convert.rs"
