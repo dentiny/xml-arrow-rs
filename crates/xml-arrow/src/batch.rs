@@ -63,7 +63,7 @@ impl XmlBatchBuilder {
         let row = parse(input, &self.schema)?;
         // Check all nested offsets before mutating any column.
         for ((column, value), field) in self.columns.iter().zip(&row).zip(&self.schema.fields) {
-            validate_capacity(column.as_ref(), field, &[value.as_ref()])?;
+            validate_capacity(column.as_ref(), field, &[value])?;
         }
         for ((column, value), field) in self.columns.iter_mut().zip(row).zip(&self.schema.fields) {
             append(column.as_mut(), field, value);

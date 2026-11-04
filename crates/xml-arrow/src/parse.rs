@@ -5,20 +5,22 @@ use roxmltree::{Document, Node};
 use crate::{Result, XmlField, XmlSchema};
 
 pub(crate) enum Value {
+    Null,
     Text(String),
     Boolean(bool),
     Integer(i64),
     Float(f64),
-    Struct(Vec<Option<Value>>),
-    List(Vec<Option<Value>>),
+    Struct(Vec<Value>),
+    List(Vec<Value>),
 }
 
+#[derive(Clone, Copy)]
 enum Source<'a, 'input> {
     Element(Node<'a, 'input>),
     Attribute(&'a str),
 }
 
-pub(crate) fn parse(input: &str, schema: &XmlSchema) -> Result<Vec<Option<Value>>> {
+pub(crate) fn parse(input: &str, schema: &XmlSchema) -> Result<Vec<Value>> {
     let document = Document::parse(input)?;
     schema
         .fields
@@ -31,28 +33,23 @@ fn extract(
     root: Node<'_, '_>,
     field: &XmlField,
     namespaces: &HashMap<String, String>,
-) -> Result<Option<Value>> {
-    let mut sources = select(root, &field.path, namespaces).into_iter();
-    let source = sources.next();
-    if sources.next().is_some() {
-        return Err(field.error("repeated value; use a list item mapping"));
+) -> Result<Value> {
+    match select(root, &field.path, namespaces).as_slice() {
+        [] => null_value(field),
+        [source] => read(*source, field, namespaces),
+        _ => Err(field.error("repeated value; use a list item mapping")),
     }
-    read(source, field, namespaces)
 }
 
 fn read(
-    source: Option<Source<'_, '_>>,
+    source: Source<'_, '_>,
     field: &XmlField,
     namespaces: &HashMap<String, String>,
-) -> Result<Option<Value>> {
+) -> Result<Value> {
     use arrow_schema::DataType;
-    let source = match source {
-        Some(source) => source,
-        None => return null_value(field),
-    };
     let node = match source {
         Source::Element(node) => node,
-        Source::Attribute(value) => return convert(field, value).map(Some),
+        Source::Attribute(value) => return convert(field, value),
     };
     if let Some(nil) = node.attribute(("http://www.w3.org/2001/XMLSchema-instance", "nil")) {
         match nil.trim_matches([' ', '\t', '\r', '\n']) {
@@ -88,7 +85,7 @@ fn read(
             Value::List(
                 select(node, &item.path, namespaces)
                     .into_iter()
-                    .map(|source| read(Some(source), item, namespaces))
+                    .map(|source| read(source, item, namespaces))
                     .collect::<Result<_>>()?,
             )
         }
@@ -104,7 +101,7 @@ fn read(
             convert(field, &text)?
         }
     };
-    Ok(Some(value))
+    Ok(value)
 }
 
 fn select<'a, 'input>(
@@ -149,9 +146,9 @@ fn select<'a, 'input>(
     nodes.into_iter().map(Source::Element).collect()
 }
 
-fn null_value(field: &XmlField) -> Result<Option<Value>> {
+fn null_value(field: &XmlField) -> Result<Value> {
     if field.field.is_nullable() {
-        Ok(None)
+        Ok(Value::Null)
     } else {
         Err(field.error("required value is missing or nil"))
     }

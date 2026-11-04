@@ -10,7 +10,7 @@ use crate::{parse::Value, Error, Result, XmlField};
 pub(crate) fn validate_capacity(
     builder: &dyn ArrayBuilder,
     field: &XmlField,
-    values: &[Option<&Value>],
+    values: &[&Value],
 ) -> Result<()> {
     match field.field.data_type() {
         DataType::Utf8 => {
@@ -18,7 +18,7 @@ pub(crate) fn validate_capacity(
             let bytes = values
                 .iter()
                 .filter_map(|value| match value {
-                    Some(Value::Text(text)) => Some(text.len()),
+                    Value::Text(text) => Some(text.len()),
                     _ => None,
                 })
                 .fold(0usize, usize::saturating_add);
@@ -38,8 +38,8 @@ pub(crate) fn validate_capacity(
             {
                 let children: Vec<_> = values
                     .iter()
-                    .map(|value| match value {
-                        Some(Value::Struct(children)) => children[index].as_ref(),
+                    .filter_map(|value| match value {
+                        Value::Struct(children) => Some(&children[index]),
                         _ => None,
                     })
                     .collect();
@@ -54,10 +54,10 @@ pub(crate) fn validate_capacity(
             let children: Vec<_> = values
                 .iter()
                 .filter_map(|value| match value {
-                    Some(Value::List(children)) => Some(children),
+                    Value::List(children) => Some(children),
                     _ => None,
                 })
-                .flat_map(|children| children.iter().map(Option::as_ref))
+                .flatten()
                 .collect();
             if builder.values_ref().len().saturating_add(children.len()) > i32::MAX as usize {
                 return Err(

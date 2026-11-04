@@ -6,17 +6,19 @@ use arrow_schema::DataType;
 
 use crate::{parse::Value, XmlField};
 
-pub(crate) fn append(builder: &mut dyn ArrayBuilder, field: &XmlField, value: Option<Value>) {
+pub(crate) fn append(builder: &mut dyn ArrayBuilder, field: &XmlField, value: Value) {
+    let valid = !matches!(value, Value::Null);
     macro_rules! scalar {
         ($builder:ty, $variant:ident) => {
             builder
                 .as_any_mut()
                 .downcast_mut::<$builder>()
                 .unwrap()
-                .append_option(value.map(|value| match value {
-                    Value::$variant(value) => value,
+                .append_option(match value {
+                    Value::Null => None,
+                    Value::$variant(value) => Some(value),
                     _ => unreachable!("parsed values match the validated schema"),
-                }))
+                })
         };
     }
     match field.field.data_type() {
@@ -29,19 +31,17 @@ pub(crate) fn append(builder: &mut dyn ArrayBuilder, field: &XmlField, value: Op
                 .as_any_mut()
                 .downcast_mut::<StructBuilder>()
                 .unwrap();
-            let valid = value.is_some();
-            let values = match value {
-                Some(Value::Struct(values)) => values,
-                None => (0..field.children.len()).map(|_| None).collect(),
+            let mut values = match value {
+                Value::Struct(values) => values.into_iter(),
+                Value::Null => Vec::new().into_iter(),
                 _ => unreachable!("parsed values match the validated schema"),
             };
-            for ((builder, field), value) in builder
-                .field_builders_mut()
-                .iter_mut()
-                .zip(&field.children)
-                .zip(values)
-            {
-                append(builder.as_mut(), field, value);
+            for (builder, field) in builder.field_builders_mut().iter_mut().zip(&field.children) {
+                append(
+                    builder.as_mut(),
+                    field,
+                    values.next().unwrap_or(Value::Null),
+                );
             }
             builder.append(valid);
         }
@@ -50,14 +50,13 @@ pub(crate) fn append(builder: &mut dyn ArrayBuilder, field: &XmlField, value: Op
                 .as_any_mut()
                 .downcast_mut::<ListBuilder<Box<dyn ArrayBuilder>>>()
                 .unwrap();
-            let valid = value.is_some();
             match value {
-                Some(Value::List(values)) => {
+                Value::List(values) => {
                     for value in values {
                         append(builder.values().as_mut(), &field.children[0], value);
                     }
                 }
-                None => {}
+                Value::Null => {}
                 _ => unreachable!("parsed values match the validated schema"),
             }
             builder.append(valid);
