@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 readme = "../../README.md"
+# This integration test embeds fixtures from the workspace root checkout.
+exclude = ["tests/real_xml.rs"]
 
 [dependencies]
 arrow-array.workspace = true

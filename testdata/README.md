@@ -29,3 +29,19 @@ snippets or a large document corpus. The XML files are stored directly in Git.
 Both local files were checked against their public upstream Git blobs before
 copying. Refresh the source revision and hashes together
 when deliberately updating a fixture.
+
+## Integration tests
+
+`crates/xml-arrow/tests/real_xml.rs` embeds these complete XML files using
+`include_str!` and converts them through the public `XmlBatchBuilder` API.
+
+- The POM test checks namespace matching, dotted property names, all 7 managed
+  dependencies in order, missing scopes, module data, and literal placeholders.
+- The topology test checks 2 CPUs, 8 bridges, 16 devices, nested list offsets,
+  numeric attributes, device identifiers, and class values.
+
+Run `cargo test -p xml-arrow --test real_xml`, or `cargo test --workspace`.
+Tests use the snapshots stored in Git and require no network access.
+
+This integration test is checkout-only and excluded from the published crate
+archive, since its data files live at the workspace root.
