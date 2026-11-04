@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 
-use crate::{Error, Result};
+use crate::{validation::validate_fields, Error, Result};
 
 /// One scalar Arrow column and its path relative to the XML record element.
 #[derive(Clone, Debug)]
@@ -61,30 +61,7 @@ impl XmlSchema {
     /// Paths use unqualified XML names and `/`, with an optional terminal `@name`.
     /// Namespace matching and XPath expressions are not supported in this stage.
     pub fn new(fields: Vec<XmlField>) -> Result<Self> {
-        let mut names = HashSet::new();
-        for field in &fields {
-            if field.field.name().is_empty() || !names.insert(field.field.name()) {
-                return Err(Error::Configuration(
-                    "column names must be nonempty and unique".into(),
-                ));
-            }
-            if !matches!(
-                field.field.data_type(),
-                DataType::Utf8 | DataType::Boolean | DataType::Int64 | DataType::Float64
-            ) {
-                return Err(Error::Configuration(format!(
-                    "unsupported type for {:?}: {}",
-                    field.field.name(),
-                    field.field.data_type()
-                )));
-            }
-            if !valid_path(&field.path) {
-                return Err(Error::Configuration(format!(
-                    "invalid path {:?}",
-                    field.path
-                )));
-            }
-        }
+        validate_fields(&fields)?;
         let arrow = Arc::new(Schema::new(
             fields.iter().map(|f| f.field.clone()).collect::<Vec<_>>(),
         ));
@@ -117,28 +94,4 @@ impl XmlSchema {
         }
         Self::new(fields)
     }
-}
-
-fn valid_path(path: &str) -> bool {
-    if path == "." {
-        return true;
-    }
-    let parts: Vec<_> = path.split('/').collect();
-    parts.iter().enumerate().all(|(index, part)| {
-        let name = if let Some(attribute) = part.strip_prefix('@') {
-            if index + 1 != parts.len() {
-                return false;
-            }
-            attribute
-        } else {
-            part
-        };
-        valid_name(name)
-    })
-}
-
-fn valid_name(name: &str) -> bool {
-    !name.contains(':')
-        && roxmltree::Document::parse(&format!("<{name}/>"))
-            .is_ok_and(|doc| doc.root_element().tag_name().name() == name)
 }

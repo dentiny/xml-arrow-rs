@@ -26,6 +26,7 @@ mod batch;
 mod error;
 mod parse;
 mod schema;
+mod validation;
 
 pub use batch::XmlBatchBuilder;
 pub use error::{Error, Result};
