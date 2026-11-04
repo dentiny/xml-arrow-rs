@@ -118,4 +118,12 @@ cargo test --workspace
 ```
 
 Dependencies use Arrow 58, matching the local `atif-arrow` reference project.
+The [testdata](testdata/README.md) directory contains checked-in real project XML
+snapshots, provenance, and third-party licenses. The `real_xml` integration tests
+read those complete XML files and verify their Arrow output offline:
+
+```sh
+cargo test -p xml-arrow --test real_xml
+```
+
 Licensed under [MIT](LICENSE).
