@@ -5,8 +5,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 readme = "../../README.md"
-# This checkout-only test embeds fixtures from the workspace root.
-exclude = ["tests/testdata.rs"]
 
 [dependencies]
 arrow-array.workspace = true

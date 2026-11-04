@@ -2,7 +2,7 @@
 
 These are complete, unmodified configuration/topology files from local checkouts
 of public projects. They are real project files rather than generated XML test
-snippets or a large document corpus. Tests embed these snapshots and run offline.
+snippets or a large document corpus. The XML files are stored directly in Git.
 
 ## LanceDB Maven POM
 
@@ -11,7 +11,7 @@ snippets or a large document corpus. Tests embed these snapshots and run offline
 - Git blob: `33446040b5e0532c945ee3f4c718563dca5250a3`.
 - SHA-256: `b4f82c7efc8b448cd59b1fa4ed84473cc5658e716c30b9adc76f7f82cb592c8c`.
 - License: [Apache-2.0](licenses/Apache-2.0.txt).
-- Coverage: default XML namespace, dotted element names, nested properties,
+- Structure: default XML namespace, dotted element names, nested properties,
   dependency/module lists, optional fields, and literal Maven placeholders.
 
 ## Azure NDv5 hardware topology
@@ -23,13 +23,9 @@ snippets or a large document corpus. Tests embed these snapshots and run offline
 - The source comment credits [Azure/azhpc-images](https://github.com/Azure/azhpc-images/blob/master/topology/ndv5-topo.xml) and is retained. NVSentinel uses
   [Apache-2.0](licenses/Apache-2.0.txt); Azure's original project uses
   [MIT, copyright Microsoft Corporation](licenses/Azure-MIT.txt).
-- Coverage: attributes and nested CPU → PCI bridge → device lists, including
-  exact counts (2 CPUs, 8 bridges, 16 devices) and integer conversion.
+- Structure: attribute-heavy CPU → PCI bridge → device hierarchy
+  (2 CPUs, 8 bridges, 16 devices).
 
 Both local files were checked against their public upstream Git blobs before
-copying. Refresh the source revision, hashes, and expected test values together
+copying. Refresh the source revision and hashes together
 when deliberately updating a fixture.
-
-Run `cargo test -p xml-arrow --test testdata` from the repository checkout.
-The fixture integration test is excluded from the published crate because its
-inputs live at the workspace root.

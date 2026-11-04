@@ -119,6 +119,5 @@ cargo test --workspace
 
 Dependencies use Arrow 58, matching the local `atif-arrow` reference project.
 The [testdata](testdata/README.md) directory contains checked-in real project XML
-snapshots and provenance; `cargo test -p xml-arrow --test testdata` converts them
-to nested Arrow batches without network access.
+snapshots, provenance, and third-party licenses.
 Licensed under [MIT](LICENSE).
