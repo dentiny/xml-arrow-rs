@@ -1,19 +1,11 @@
-use std::{
-    io,
-    pin::Pin,
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
-    },
-    task::{Context, Poll},
-};
+use std::{io, task::Poll};
 
 use arrow_array::{cast::AsArray, types::Int64Type, RecordBatch};
 use arrow_schema::DataType::{Int64, Utf8};
 use futures_executor::block_on;
 use futures_util::{
-    io::{AsyncRead, BufReader, Cursor},
-    FutureExt, TryStreamExt,
+    io::{AsyncBufRead, AsyncReadExt, BufReader, Cursor},
+    stream, FutureExt, TryStreamExt,
 };
 use xml_arrow::{Limit, ReadError, ReaderOptions, XmlField, XmlReader, XmlSchema};
 
@@ -21,61 +13,27 @@ fn schema() -> XmlSchema {
     XmlSchema::new(vec![XmlField::new("id", "@id", Int64, false)]).unwrap()
 }
 
-// One byte per read and alternating Pending exercise cancellation inside tokens.
-struct Input<'a> {
-    bytes: &'a [u8],
-    pos: usize,
-    pause: bool,
-    fail_at: Option<usize>,
-    consumed: Arc<AtomicUsize>,
-    dropped: Arc<AtomicBool>,
-}
-
-fn input(bytes: &[u8]) -> BufReader<Input<'_>> {
-    BufReader::with_capacity(
-        1,
-        Input {
-            bytes,
-            pos: 0,
-            pause: true,
-            fail_at: None,
-            consumed: Arc::new(AtomicUsize::new(0)),
-            dropped: Arc::new(AtomicBool::new(false)),
-        },
-    )
-}
-
-impl AsyncRead for Input<'_> {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        out: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
-        let this = self.get_mut();
-        this.pause = !this.pause;
-        if !this.pause {
+// One-byte chunks and alternating Pending exercise cancellation inside tokens.
+fn input(mut bytes: &[u8]) -> impl AsyncBufRead + Unpin + Send + '_ {
+    let mut pending = false;
+    stream::poll_fn(move |cx| {
+        pending = !pending;
+        if pending {
             cx.waker().wake_by_ref();
-            return Poll::Pending;
+            Poll::Pending
+        } else if bytes.is_empty() {
+            Poll::Ready(None)
+        } else {
+            let (byte, rest) = bytes.split_at(1);
+            bytes = rest;
+            Poll::Ready(Some(Ok::<_, io::Error>(byte)))
         }
-        if this.fail_at == Some(this.pos) {
-            return Poll::Ready(Err(io::Error::other("injected input failure")));
-        }
-        let len = out.len().min(1).min(this.bytes.len() - this.pos);
-        out[..len].copy_from_slice(&this.bytes[this.pos..this.pos + len]);
-        this.pos += len;
-        this.consumed.store(this.pos, Ordering::SeqCst);
-        Poll::Ready(Ok(len))
-    }
+    })
+    .into_async_read()
 }
 
-impl Drop for Input<'_> {
-    fn drop(&mut self) {
-        self.dropped.store(true, Ordering::SeqCst);
-    }
-}
-
-fn read_xml(xml: &[u8], options: ReaderOptions) -> XmlReader<'_> {
-    XmlReader::new(Cursor::new(xml), schema(), "/root/row", options).unwrap()
+fn read<'a>(input: impl AsyncBufRead + Unpin + Send + 'a, options: ReaderOptions) -> XmlReader<'a> {
+    XmlReader::new(input, schema(), "/root/row", options).unwrap()
 }
 
 fn ids(batch: &RecordBatch, column: usize) -> &[i64] {
@@ -108,34 +66,17 @@ fn split_tokens_utf8_and_namespace_context_survive_batch_boundaries() {
         let mut reader = XmlReader::new(input, schema, "/r:root/r:row", options).unwrap();
         assert_eq!(reader.schema().field(0).name(), "name");
         let first = reader.next_batch().await.unwrap().unwrap();
+        let names = first.column(0).as_string::<i32>();
         assert_eq!(
-            first
-                .column(0)
-                .as_string::<i32>()
-                .iter()
-                .collect::<Vec<_>>(),
-            vec![Some("北<京>&"), Some("東京")]
+            names.iter().collect::<Vec<_>>(),
+            [Some("北<京>&"), Some("東京")]
         );
         assert_eq!(ids(&first, 1), &[1, 2]);
         let rest: Vec<_> = reader.into_stream().try_collect().await.unwrap();
         assert_eq!(rest.len(), 1);
         assert_eq!(rest[0].num_rows(), 1);
-        assert_eq!(rest[0].column(0).as_string::<i32>().value(0), "");
-        assert!(arrow_array::Array::is_null(rest[0].column(0).as_ref(), 0));
-        assert_eq!(rest[0].column(1).as_primitive::<Int64Type>().value(0), 3);
-    });
-}
-
-#[test]
-fn inherited_namespace_cannot_inject_record_attributes() {
-    block_on(async {
-        let xml = r#"<root xmlns:p='urn:x" id="7'><row/></root>"#;
-        let mut reader = read_xml(xml.as_bytes(), ReaderOptions::default());
-        assert!(
-            matches!(reader.next_batch().await, Err(ReadError::Conversion {
-            source: xml_arrow::Error::Field { name, .. }, ..
-        }) if name == "id")
-        );
+        assert_eq!(rest[0].column(0).null_count(), 1);
+        assert_eq!(ids(&rest[0], 1), &[3]);
     });
 }
 
@@ -144,16 +85,13 @@ fn cancelled_next_batch_resumes_without_losing_partial_events_or_rows() {
     for (batch_size, bom) in [(1, "\u{FEFF}"), (1024, "")] {
         let xml = format!("{bom}<root><row id='1'/><row id='2' note='北😀'/></root>");
         let input = input(xml.as_bytes());
-        let mut reader = XmlReader::new(
+        let mut reader = read(
             input,
-            schema(),
-            "/root/row",
             ReaderOptions {
                 batch_size,
                 ..Default::default()
             },
-        )
-        .unwrap();
+        );
         let mut cancelled = 0;
         let mut rows = Vec::new();
         let mut eof = false;
@@ -175,35 +113,36 @@ fn cancelled_next_batch_resumes_without_losing_partial_events_or_rows() {
 }
 
 #[test]
-fn first_conversion_or_io_error_discards_partial_batch_and_ends_input() {
+fn conversion_and_io_errors_end_the_reader() {
     block_on(async {
         let xml = "<root>\n  <row id='1'/>\n  <row id='bad'/>\n  <row id='3'/>\n</root>";
-        let mut reader = read_xml(xml.as_bytes(), ReaderOptions::default());
-        let error = reader.next_batch().await.unwrap_err();
-        assert!(
-            matches!(error, ReadError::Conversion { record_index: 2, byte_offset, .. } if byte_offset == xml.find("<row id='bad'").unwrap() as u64)
-        );
-        assert!(reader.next_batch().await.unwrap().is_none());
-        assert!(reader.next_batch().await.unwrap().is_none());
-        let mut reader = XmlReader::new(
-            input(b"\xEF\xBB\xBF<row id='bad'/>"),
-            schema(),
-            "/row",
-            ReaderOptions::default(),
-        )
-        .unwrap();
-        assert!(matches!(
-            reader.next_batch().await,
-            Err(ReadError::Conversion {
-                record_index: 1,
-                byte_offset: 3,
-                ..
-            })
-        ));
-        let mut input = input(xml.as_bytes());
-        input.get_mut().fail_at = Some(xml.find("<row id='bad'").unwrap());
-        let mut reader =
-            XmlReader::new(input, schema(), "/root/row", ReaderOptions::default()).unwrap();
+        // XML, record path, failed record index, and opening-tag marker.
+        for (xml, path, index, tag) in [
+            (xml, "/root/row", 2, "<row id='bad'"),
+            ("\u{FEFF}<row id='bad'/>", "/row", 1, "<row"),
+            (
+                r#"<root xmlns:p='urn:x" id="7'><row/></root>"#,
+                "/root/row",
+                1,
+                "<row",
+            ),
+        ] {
+            let mut reader =
+                XmlReader::new(input(xml.as_bytes()), schema(), path, Default::default()).unwrap();
+            let offset = xml.find(tag).unwrap() as u64;
+            assert!(
+                matches!(reader.next_batch().await, Err(ReadError::Conversion {
+                record_index, byte_offset, source: xml_arrow::Error::Field { name, .. },
+            }) if record_index == index && byte_offset == offset && name == "id")
+            );
+            for _ in 0..2 {
+                assert!(reader.next_batch().await.unwrap().is_none());
+            }
+        }
+        let prefix = &xml.as_bytes()[..xml.find("<row id='bad'").unwrap()];
+        let error = stream::iter([Err::<&[u8], _>(io::Error::other("injected input failure"))])
+            .into_async_read();
+        let mut reader = read(Cursor::new(prefix).chain(error), Default::default());
         let error = reader.next_batch().await.unwrap_err();
         assert!(error.to_string().contains("injected input failure"));
         assert!(std::error::Error::source(&error).is_some());
@@ -214,47 +153,38 @@ fn first_conversion_or_io_error_discards_partial_batch_and_ends_input() {
 #[test]
 fn limits_apply_to_unselected_content_and_batches_keep_lookahead_records() {
     block_on(async {
-        let cases = [
+        for (xml, expected) in [
             (
-                "<root><skip><deep/></skip></root>".to_owned(),
-                ReaderOptions {
-                    max_depth: 2,
-                    ..Default::default()
-                },
+                "<root><skip><deep><too-deep/></deep></skip></root>".to_owned(),
                 Limit::Depth,
             ),
             (
                 format!("<root><!--{}--></root>", "x".repeat(5000)),
-                ReaderOptions {
-                    max_record_bytes: 32,
-                    max_batch_bytes: 64,
-                    ..Default::default()
-                },
                 Limit::EventBytes,
             ),
             (
                 "<root><row><v>123456789012345</v><v>123456789012345</v></row></root>".to_owned(),
-                ReaderOptions {
-                    max_record_bytes: 40,
-                    max_batch_bytes: 80,
-                    ..Default::default()
-                },
                 Limit::RecordBytes,
             ),
-        ];
-        for (xml, options, expected) in cases {
-            let input = input(xml.as_bytes());
-            let consumed = input.get_ref().consumed.clone();
-            let mut reader =
-                XmlReader::new(input, XmlSchema::new(vec![]).unwrap(), "/root/row", options)
-                    .unwrap();
+        ] {
+            let mut source = Cursor::new(xml.as_bytes());
+            let mut reader = read(
+                BufReader::with_capacity(1, &mut source),
+                ReaderOptions {
+                    max_depth: 3,
+                    max_record_bytes: 32,
+                    max_batch_bytes: 64,
+                    ..Default::default()
+                },
+            );
             assert!(
                 matches!(reader.next_batch().await, Err(ReadError::LimitExceeded { kind, .. }) if kind == expected)
             );
-            if expected == Limit::EventBytes {
-                assert!(consumed.load(Ordering::SeqCst) < 100);
-            }
             assert!(reader.next_batch().await.unwrap().is_none());
+            drop(reader);
+            if expected == Limit::EventBytes {
+                assert!(source.position() < 100);
+            }
         }
         let options = ReaderOptions {
             batch_size: 10,
@@ -263,7 +193,10 @@ fn limits_apply_to_unselected_content_and_batches_keep_lookahead_records() {
             projection: Some(vec![]),
             ..Default::default()
         };
-        let mut reader = read_xml(b"\xEF\xBB\xBF<root><row/><row/><row/></root>", options);
+        let mut reader = read(
+            Cursor::new(b"\xEF\xBB\xBF<root><row/><row/><row/></root>"),
+            options,
+        );
         let first = reader.next_batch().await.unwrap().unwrap();
         assert_eq!((first.num_rows(), first.num_columns()), (2, 0));
         assert_eq!(reader.next_batch().await.unwrap().unwrap().num_rows(), 1);
@@ -284,29 +217,25 @@ fn malformed_documents_fail_and_configuration_is_checked_before_io() {
             "<root><1bad/></root>",
             "<root><skip>&unknown;</skip></root>",
         ] {
-            let mut reader = read_xml(xml.as_bytes(), ReaderOptions::default());
+            let mut reader = read(Cursor::new(xml.as_bytes()), Default::default());
             assert!(reader.next_batch().await.is_err(), "{xml}");
             assert!(reader.next_batch().await.unwrap().is_none());
         }
-        let mut empty = read_xml(
-            "\u{FEFF}<?xml version='1.0'?><root/>".as_bytes(),
-            ReaderOptions::default(),
+        let mut empty = read(
+            Cursor::new("\u{FEFF}<?xml version='1.0'?><root/>".as_bytes()),
+            Default::default(),
         );
         assert!(empty.next_batch().await.unwrap().is_none());
     });
-    for path in [
+    let paths = [
         "root/row",
         "/root//row",
         "/root/@id",
         "/root/*",
         "/root/u:row",
-    ] {
-        assert!(matches!(
-            XmlReader::new(Cursor::new(b""), schema(), path, ReaderOptions::default()),
-            Err(ReadError::Configuration(_))
-        ));
-    }
-    for options in [
+    ]
+    .map(|path| (path, ReaderOptions::default()));
+    let options = [
         ReaderOptions {
             batch_size: 0,
             ..Default::default()
@@ -323,11 +252,15 @@ fn malformed_documents_fail_and_configuration_is_checked_before_io() {
             max_batch_bytes: 1,
             ..Default::default()
         },
-    ] {
-        let input = input(b"<root/>");
-        let consumed = input.get_ref().consumed.clone();
-        assert!(XmlReader::new(input, schema(), "/root/row", options).is_err());
-        assert_eq!(consumed.load(Ordering::SeqCst), 0);
+    ]
+    .map(|options| ("/root/row", options));
+    for (path, options) in paths.into_iter().chain(options) {
+        let mut source = Cursor::new(b"<root/>");
+        assert!(matches!(
+            XmlReader::new(&mut source, schema(), path, options),
+            Err(ReadError::Configuration(_))
+        ));
+        assert_eq!(source.position(), 0);
     }
 }
 
@@ -338,25 +271,21 @@ fn first_batch_does_not_read_the_tail_and_drop_releases_input() {
             "<root><row id='1'/><skip>{}</skip></root>",
             "x".repeat(5000)
         );
-        let input = input(xml.as_bytes());
-        let consumed = input.get_ref().consumed.clone();
-        let dropped = input.get_ref().dropped.clone();
-        let mut reader = XmlReader::new(
-            input,
-            schema(),
-            "/root/row",
-            ReaderOptions {
-                batch_size: 1,
-                ..Default::default()
-            },
-        )
-        .unwrap();
+        let mut source = Cursor::new(xml.as_bytes());
+        let options = ReaderOptions {
+            batch_size: 1,
+            ..Default::default()
+        };
+        drop(read(
+            BufReader::with_capacity(1, &mut source),
+            options.clone(),
+        ));
+        assert_eq!(source.position(), 0);
+        let mut reader = read(BufReader::with_capacity(1, &mut source), options);
         fn assert_send<T: Send>(_: &T) {}
         assert_send(&reader);
-        assert_eq!(consumed.load(Ordering::SeqCst), 0);
         assert_eq!(reader.next_batch().await.unwrap().unwrap().num_rows(), 1);
-        assert!(consumed.load(Ordering::SeqCst) < 30);
         drop(reader);
-        assert!(dropped.load(Ordering::SeqCst));
+        assert!(source.position() < 30);
     });
 }
