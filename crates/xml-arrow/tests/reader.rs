@@ -13,7 +13,7 @@ fn schema() -> XmlSchema {
     XmlSchema::new(vec![XmlField::new("id", "@id", Int64, false)]).unwrap()
 }
 
-// One-byte chunks and alternating Pending exercise cancellation inside tokens.
+// Force cancellation inside XML tokens.
 fn input(mut bytes: &[u8]) -> impl AsyncBufRead + Unpin + Send + '_ {
     let mut pending = false;
     stream::poll_fn(move |cx| {
@@ -116,7 +116,7 @@ fn cancelled_next_batch_resumes_without_losing_partial_events_or_rows() {
 fn conversion_and_io_errors_end_the_reader() {
     block_on(async {
         let xml = "<root>\n  <row id='1'/>\n  <row id='bad'/>\n  <row id='3'/>\n</root>";
-        // XML, record path, failed record index, and opening-tag marker.
+        // XML, path, record index, opening-tag marker.
         for (xml, path, index, tag) in [
             (xml, "/root/row", 2, "<row id='bad'"),
             ("\u{FEFF}<row id='bad'/>", "/row", 1, "<row"),

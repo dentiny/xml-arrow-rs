@@ -1,52 +1,51 @@
 use std::{error::Error, io};
 
-/// A result using this crate's [`ReadError`] type.
+/// Result with [`ReadError`].
 pub type Result<T> = std::result::Result<T, ReadError>;
 
-/// The resource limit reached while reading XML.
+/// XML input limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Limit {
-    /// Total element nesting depth, including unselected elements.
+    /// Document element depth.
     Depth,
-    /// Serialized record bytes, including inherited namespace declarations.
+    /// Record bytes, including inherited namespaces.
     RecordBytes,
-    /// Source bytes consumed for one XML event, including unselected content.
+    /// Input bytes per event, including skipped content.
     EventBytes,
 }
 
-/// Configuration, XML input, resource-limit, or record conversion failure.
+/// XML reader error.
 #[derive(Debug, thiserror::Error)]
 pub enum ReadError {
-    /// Invalid options or record path; detected before input is read.
+    /// Invalid options or record path.
     #[error("invalid configuration: {0}")]
     Configuration(String),
-    /// XML parsing, UTF-8, or input I/O error with the original source.
+    /// XML, UTF-8, or input error.
     #[error("XML input at byte {byte_offset}: {source}")]
     Xml {
-        /// Source byte offset reached by the parser.
+        /// Input byte offset.
         byte_offset: u64,
-        /// Original error; parser positions within a validated token are relative
-        /// to that token, while `byte_offset` locates it in the input.
+        /// Underlying error; XML locations may be event-relative.
         source: Box<dyn Error + Send + Sync>,
     },
-    /// An event, record, or document depth exceeded the configured limit.
+    /// Input limit exceeded.
     #[error("{kind:?} limit {limit} exceeded at byte {byte_offset}")]
     LimitExceeded {
-        /// Limit that was exceeded.
+        /// Exceeded limit.
         kind: Limit,
         /// Configured maximum.
         limit: usize,
-        /// Source byte offset reached by the parser.
+        /// Input byte offset.
         byte_offset: u64,
     },
-    /// A complete record failed Arrow conversion.
+    /// Record conversion failed.
     #[error("record {record_index} at byte {byte_offset}: {source}")]
     Conversion {
         /// One-based index among selected records.
         record_index: u64,
-        /// Byte offset of the selected record's opening tag.
+        /// Record start byte offset.
         byte_offset: u64,
-        /// Original conversion error, including field name and path if available.
+        /// Underlying conversion error.
         source: crate::Error,
     },
 }

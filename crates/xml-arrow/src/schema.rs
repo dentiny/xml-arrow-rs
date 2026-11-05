@@ -10,7 +10,7 @@ use crate::{
     Error, Result,
 };
 
-/// An Arrow field and its XML path, relative to its parent element.
+/// An Arrow field with a relative XML path.
 #[derive(Clone, Debug)]
 pub struct XmlField {
     pub(crate) field: Field,
@@ -19,11 +19,7 @@ pub struct XmlField {
 }
 
 impl XmlField {
-    /// Describes a scalar column. [`XmlSchema::new`] validates its name, path,
-    /// and type. Use [`Self::structure`] or [`Self::list`] for nested mappings.
-    ///
-    /// `.` selects record text, `@id` a record attribute, `title` child text,
-    /// and `author/@id` an attribute on a descendant element.
+    /// Maps a scalar column to a relative path, such as `.`, `@id`, or `author/name`.
     pub fn new(
         name: impl Into<String>,
         path: impl Into<String>,
@@ -37,7 +33,7 @@ impl XmlField {
         }
     }
 
-    /// Maps one element to a struct. Child paths are relative to that element.
+    /// Maps a struct with child paths relative to its element.
     pub fn structure(
         name: impl Into<String>,
         path: impl Into<String>,
@@ -53,9 +49,8 @@ impl XmlField {
         }
     }
 
-    /// Maps one container element to a list. The item path selects repeated values
-    /// inside the container. An existing container with no matching items is empty;
-    /// a missing or `xsi:nil` container is null if nullable, otherwise an error.
+    /// Maps a list container; the item path selects repeated values inside it.
+    /// Empty containers become `[]`; missing or nil nullable containers become null.
     pub fn list(
         name: impl Into<String>,
         path: impl Into<String>,
@@ -69,12 +64,12 @@ impl XmlField {
         }
     }
 
-    /// Arrow field including its name, type, and nullability.
+    /// Arrow field definition.
     pub fn arrow_field(&self) -> &Field {
         &self.field
     }
 
-    /// XML path relative to the parent element (the record for top-level fields).
+    /// XML path relative to its parent element.
     pub fn path(&self) -> &str {
         &self.path
     }
@@ -93,7 +88,7 @@ impl XmlField {
     }
 }
 
-/// Validated, ordered column mappings, namespace bindings, and Arrow schema.
+/// Validated column mappings and namespace bindings.
 #[derive(Clone, Debug)]
 pub struct XmlSchema {
     pub(crate) fields: Vec<XmlField>,
@@ -102,18 +97,13 @@ pub struct XmlSchema {
 }
 
 impl XmlSchema {
-    /// Validates column mappings. Empty schemas are supported and count rows.
-    ///
-    /// Supports scalar types, structs, and lists. Unprefixed paths select names
-    /// without a namespace. `xml` is predefined; use [`Self::with_namespaces`]
-    /// for other path prefixes. XPath expressions are not supported.
+    /// Validates column mappings. An empty schema counts rows.
     pub fn new(fields: Vec<XmlField>) -> Result<Self> {
         Self::with_namespaces(fields, &[])
     }
 
-    /// Binds schema path prefixes to namespace URIs. Prefixes in the input XML
-    /// may differ, including use of a default namespace. Bindings also apply to
-    /// attributes and nested fields. `xml` and `xmlns` cannot be rebound.
+    /// Binds path prefixes to namespace URIs; input prefixes may differ.
+    /// `xml` is predefined; `xml` and `xmlns` cannot be rebound.
     pub fn with_namespaces(fields: Vec<XmlField>, bindings: &[(&str, &str)]) -> Result<Self> {
         let namespaces = validate_namespaces(bindings)?;
         validate_fields(&fields, &namespaces)?;
@@ -132,7 +122,7 @@ impl XmlSchema {
         &self.fields
     }
 
-    /// The Arrow output schema.
+    /// Arrow output schema.
     pub fn arrow_schema(&self) -> SchemaRef {
         Arc::clone(&self.arrow)
     }

@@ -24,22 +24,15 @@ struct Name {
     local: String,
 }
 
-/// Reads one XML document as batches of elements selected by an absolute path.
-///
-/// Inputs implement `futures::io::AsyncBufRead + Unpin + Send` and may borrow data
-/// for `'a`. Pending parsing/batch work is owned by the internal stream, so
-/// dropping a pending `next_batch()` future preserves it for a later call.
-/// The first error discards the unfinished batch and ends the reader. Batches
-/// already returned remain valid; unread document tails are validated as consumed.
+/// Reads XML records selected by an absolute path into Arrow batches.
 pub struct XmlReader<'a> {
     batches: BoxStream<'a, Result<RecordBatch>>,
-    // Shared schema remains available after the stream drops its parsing state.
+    // Keep the schema available after EOF.
     schema: SchemaRef,
 }
 
 impl<'a> XmlReader<'a> {
-    /// Creates a reader without reading input. Record paths include the document
-    /// root, e.g. `/catalog/book`; prefixes use the supplied schema's URI bindings.
+    /// Creates a reader without reading input. Path prefixes use schema bindings.
     pub fn new<R: AsyncBufRead + Unpin + Send + 'a>(
         input: R,
         schema: XmlSchema,
@@ -55,18 +48,18 @@ impl<'a> XmlReader<'a> {
         Ok(Self { batches, schema })
     }
 
-    /// Arrow output schema, including column projection.
+    /// Projected output schema.
     pub fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }
 
-    /// Returns the next batch, `None` at EOF, or the first error. Pending calls
-    /// may be cancelled and retried. After an error, future calls return `None`.
+    /// Returns a batch or EOF. The first error discards pending rows and ends input.
+    /// Cancelled calls can resume; calls after an error return `None`.
     pub async fn next_batch(&mut self) -> Result<Option<RecordBatch>> {
         self.batches.try_next().await
     }
 
-    /// Consumes the reader as a Send stream; stops after EOF or its first error.
+    /// Consumes the reader as a batch stream.
     pub fn into_stream(self) -> BoxStream<'a, Result<RecordBatch>> {
         self.batches
     }
