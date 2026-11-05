@@ -27,3 +27,7 @@ path = "../../examples/convert.rs"
 [[example]]
 name = "infer"
 path = "../../examples/infer.rs"
+
+[[example]]
+name = "stream"
+path = "../../examples/stream.rs"
