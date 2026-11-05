@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::{XmlBatchBuilder, XmlSchema};
+use crate::{NamespaceBinding, XmlBatchBuilder, XmlSchema};
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use futures_util::io::{AsyncBufRead, AsyncReadExt, Chain, Cursor, Take};
@@ -77,8 +77,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
     pub(super) async fn infer(
         input: R,
         path: &str,
-        // (Namespace prefix, namespace URI) pairs.
-        bindings: &[(&str, &str)],
+        bindings: &[NamespaceBinding<'_>],
         options: ReaderOptions,
         sampling: InferenceOptions,
     ) -> Result<Self> {

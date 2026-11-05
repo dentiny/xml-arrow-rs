@@ -11,7 +11,7 @@ use futures_util::{
     io::{AsyncBufRead, Cursor},
     stream, TryStreamExt,
 };
-use xml_arrow::{InferenceOptions, Limit, ReadError, ReaderOptions, XmlReader};
+use xml_arrow::{InferenceOptions, Limit, NamespaceBinding, ReadError, ReaderOptions, XmlReader};
 
 fn input(xml: &str) -> impl AsyncBufRead + Unpin + Send + '_ {
     stream::iter(xml.as_bytes().chunks(1).map(Ok::<_, io::Error>)).into_async_read()
@@ -88,7 +88,10 @@ fn namespaces_nested_lists_and_nil_match_the_existing_converter() {
         let reader = XmlReader::infer(
             input(xml),
             "/r:root/r:row",
-            &[("r", "urn:rows")],
+            &[NamespaceBinding {
+                prefix: "r",
+                uri: "urn:rows",
+            }],
             ReaderOptions::default(),
             InferenceOptions::default(),
         )

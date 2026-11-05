@@ -74,6 +74,6 @@ mod validation;
 
 pub use batch::XmlBatchBuilder;
 pub use error::{Error, Result};
-pub use schema::{XmlField, XmlSchema};
+pub use schema::{NamespaceBinding, XmlField, XmlSchema};
 
 pub use reader::{InferenceOptions, Limit, ReadError, ReaderOptions, ReaderResult, XmlReader};

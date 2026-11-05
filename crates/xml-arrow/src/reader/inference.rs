@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use arrow_schema::DataType;
 use roxmltree::Node;
 
-use crate::{parse::is_nil, Error, Result, XmlField, XmlSchema};
+use crate::{parse::is_nil, Error, NamespaceBinding, Result, XmlField, XmlSchema};
 
 // (Optional namespace URI, local name); attributes use "@name", text uses ".".
 type Name = (Option<String>, String);
@@ -33,11 +33,11 @@ impl Inference {
         self.0.merge(element(document.root_element(), true)?)
     }
 
-    pub(super) fn finish(self, bindings: &[(&str, &str)]) -> Result<XmlSchema> {
+    pub(super) fn finish(self, bindings: &[NamespaceBinding<'_>]) -> Result<XmlSchema> {
         let mut uris = BTreeSet::new();
         self.0.namespaces(&mut uris);
         let mut namespaces = BTreeMap::from([(roxmltree::NS_XML_URI.to_owned(), "xml".to_owned())]);
-        for &(prefix, uri) in bindings {
+        for &NamespaceBinding { prefix, uri } in bindings {
             let previous = namespaces
                 .entry(uri.to_owned())
                 .or_insert_with(|| prefix.to_owned());
@@ -76,7 +76,10 @@ impl Inference {
         let bindings: Vec<_> = namespaces
             .iter()
             .filter(|(uri, _)| uri.as_str() != roxmltree::NS_XML_URI)
-            .map(|(uri, prefix)| (prefix.as_str(), uri.as_str()))
+            .map(|(uri, prefix)| NamespaceBinding {
+                prefix: prefix.as_str(),
+                uri: uri.as_str(),
+            })
             .collect();
         XmlSchema::with_namespaces(fields, &bindings)
     }

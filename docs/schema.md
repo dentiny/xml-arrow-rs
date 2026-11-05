@@ -80,7 +80,8 @@ Other unmapped content is ignored.
 
 ## Namespaces
 
-`XmlSchema::with_namespaces(fields, &[("b", "urn:books")])` binds schema prefixes.
+`XmlSchema::with_namespaces(fields, bindings)` accepts
+`NamespaceBinding { prefix: "b", uri: "urn:books" }` entries.
 The input can use another prefix or a default namespace for the same URI.
 `xml` is predefined; `xml` and `xmlns` cannot be rebound. Duplicate prefixes,
 empty URIs, and reserved URI bindings are configuration errors.

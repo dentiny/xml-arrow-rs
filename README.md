@@ -55,6 +55,8 @@ checked only for selected columns.
 ## Nested fields and namespaces
 
 ```rust
+use xml_arrow::NamespaceBinding;
+
 let schema = XmlSchema::with_namespaces(vec![
     XmlField::structure("author", "b:author", true, vec![
         XmlField::new("id", "@id", DataType::Int64, false),
@@ -62,7 +64,7 @@ let schema = XmlSchema::with_namespaces(vec![
     ]),
     XmlField::list("tags", "b:tags", true,
         XmlField::new("item", "b:tag", DataType::Utf8, true)),
-], &[("b", "urn:books")])?;
+], &[NamespaceBinding { prefix: "b", uri: "urn:books" }])?;
 let mut builder = XmlBatchBuilder::new(schema, 1024)?;
 builder.append_xml(r#"<book xmlns="urn:books">
     <author id="7"><name>Jane</name></author>
@@ -137,7 +139,7 @@ read ahead. These are input limits, not Arrow allocation or RSS limits.
 
 `XmlReader::infer(input, record_path, bindings, reader_options, inference_options)`
 samples complete records, fixes the schema, then replays the sample before reading
-more input. It works without seek or reopening storage. Namespace bindings have
+more input. It works without seek or reopening storage. `NamespaceBinding { prefix, uri }` entries have
 the same meaning as in `XmlSchema::with_namespaces`; pass `&[]` when unused.
 
 ```sh

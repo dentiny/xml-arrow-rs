@@ -1,6 +1,6 @@
 use arrow_array::{cast::AsArray, types::Int64Type, Array};
 use arrow_schema::DataType::{Int64, Utf8};
-use xml_arrow::{XmlBatchBuilder, XmlField, XmlSchema};
+use xml_arrow::{NamespaceBinding, XmlBatchBuilder, XmlField, XmlSchema};
 
 #[test]
 fn structs_preserve_parent_nulls_and_required_children() {
@@ -164,7 +164,16 @@ fn namespace_uris_match_across_prefixes_default_namespaces_and_projection() {
                 ],
             ),
         ],
-        &[("p", "urn:person"), ("m", "urn:meta")],
+        &[
+            NamespaceBinding {
+                prefix: "p",
+                uri: "urn:person",
+            },
+            NamespaceBinding {
+                prefix: "m",
+                uri: "urn:meta",
+            },
+        ],
     )
     .unwrap();
     let mut b = XmlBatchBuilder::new_projected(schema, 2, &[1]).unwrap();
