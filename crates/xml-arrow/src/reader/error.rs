@@ -48,7 +48,7 @@ pub enum ReadError {
 }
 
 impl ReadError {
-    pub(crate) fn xml(byte_offset: u64, source: impl Error + Send + Sync + 'static) -> Self {
+    pub(super) fn xml(byte_offset: u64, source: impl Error + Send + Sync + 'static) -> Self {
         Self::Xml {
             byte_offset,
             source: Box::new(source),

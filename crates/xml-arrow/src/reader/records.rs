@@ -21,9 +21,9 @@ struct Name {
     local: String,
 }
 
-pub(crate) struct Record {
-    pub xml: String,
-    pub byte_offset: u64,
+pub(super) struct Record {
+    pub(super) xml: String,
+    pub(super) byte_offset: u64,
 }
 
 struct Capture {
@@ -33,7 +33,7 @@ struct Capture {
 
 type Input<R> = Compat<Take<Chain<Cursor<Vec<u8>>, R>>>;
 
-pub(crate) struct RecordReader<R> {
+pub(super) struct RecordReader<R> {
     reader: NsReader<Input<R>>,
     buffer: Vec<u8>,
     path: Vec<Name>,
@@ -47,7 +47,12 @@ pub(crate) struct RecordReader<R> {
 }
 
 impl<R: AsyncBufRead + Unpin> RecordReader<R> {
-    pub fn new(input: R, schema: &XmlSchema, path: &str, options: &ReaderOptions) -> Result<Self> {
+    pub(super) fn new(
+        input: R,
+        schema: &XmlSchema,
+        path: &str,
+        options: &ReaderOptions,
+    ) -> Result<Self> {
         let mut names = Vec::new();
         let path = path.strip_prefix('/').ok_or_else(|| {
             ReadError::Configuration("record path must be absolute, e.g. /catalog/book".into())
@@ -102,7 +107,7 @@ impl<R: AsyncBufRead + Unpin> RecordReader<R> {
         })
     }
 
-    pub async fn next_record(&mut self) -> Result<Option<Record>> {
+    pub(super) async fn next_record(&mut self) -> Result<Option<Record>> {
         if !self.initialized {
             // quick-xml's BOM removal requires three bytes in one fill_buf.
             // Read the prefix explicitly so single-byte buffers work too.

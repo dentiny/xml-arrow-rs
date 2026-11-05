@@ -38,7 +38,7 @@ impl Default for ReaderOptions {
 }
 
 impl ReaderOptions {
-    pub(crate) fn validate(&self) -> Result<()> {
+    pub(super) fn validate(&self) -> Result<()> {
         if self.batch_size == 0
             || self.max_record_bytes == 0
             || self.max_record_bytes.checked_add(1).is_none()
