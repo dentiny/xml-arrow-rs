@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::{validation::valid_name, XmlBatchBuilder, XmlSchema};
+use crate::{XmlBatchBuilder, XmlSchema};
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use futures_util::io::{AsyncBufRead, AsyncReadExt, Chain, Cursor, Take};
@@ -12,13 +12,7 @@ use quick_xml::{
 };
 use tokio_util::compat::{Compat, FuturesAsyncReadCompatExt};
 
-use super::{error::Result, Limit, ReadError, ReaderOptions};
-
-#[derive(PartialEq, Eq)]
-struct Name {
-    uri: Option<String>,
-    local: String,
-}
+use super::{error::Result, validation::validate_reader, Limit, Name, ReadError, ReaderOptions};
 
 struct Record {
     xml: String,
@@ -64,37 +58,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
         path: &str,
         options: ReaderOptions,
     ) -> Result<Self> {
-        options.validate()?;
-        let mut names = Vec::new();
-        let path = path.strip_prefix('/').ok_or_else(|| {
-            ReadError::Configuration("record path must be absolute, e.g. /catalog/book".into())
-        })?;
-        for part in path.split('/') {
-            let (prefix, local) = part
-                .split_once(':')
-                .map_or((None, part), |(prefix, local)| (Some(prefix), local));
-            let uri = prefix
-                .map(|prefix| {
-                    schema.namespaces.get(prefix).cloned().ok_or_else(|| {
-                        ReadError::Configuration(format!("unbound record path prefix {prefix:?}"))
-                    })
-                })
-                .transpose()?;
-            if !valid_name(local) {
-                return Err(ReadError::Configuration(format!(
-                    "invalid record path segment {part:?}"
-                )));
-            }
-            names.push(Name {
-                uri,
-                local: local.into(),
-            });
-        }
-        if names.len() > options.max_depth {
-            return Err(ReadError::Configuration(
-                "record path exceeds max_depth".into(),
-            ));
-        }
+        let path = validate_reader(&schema, path, &options)?;
         let builder = match options.projection.as_deref() {
             Some(indices) => XmlBatchBuilder::new_projected(schema, options.batch_size, indices),
             None => XmlBatchBuilder::new(schema, options.batch_size),
@@ -110,7 +74,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
         reader.config_mut().check_comments = true;
         Ok(Self {
             reader,
-            path: names,
+            path,
             stack: Vec::new(),
             root_seen: false,
             bom_bytes: 0,

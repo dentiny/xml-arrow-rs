@@ -10,12 +10,19 @@ use futures_util::{
 mod error;
 mod options;
 mod state;
+mod validation;
 
 pub use error::{Limit, ReadError, Result as ReaderResult};
 pub use options::ReaderOptions;
 
 use error::Result;
 use state::ReaderState;
+
+#[derive(PartialEq, Eq)]
+struct Name {
+    uri: Option<String>,
+    local: String,
+}
 
 /// Reads one XML document as batches of elements selected by an absolute path.
 ///

@@ -1,5 +1,3 @@
-use super::{error::Result, ReadError};
-
 const DEFAULT_BATCH_SIZE: usize = 1024;
 const DEFAULT_MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
 const DEFAULT_MAX_BATCH_BYTES: usize = 64 * 1024 * 1024;
@@ -34,19 +32,5 @@ impl Default for ReaderOptions {
             max_depth: DEFAULT_MAX_DEPTH,
             projection: None,
         }
-    }
-}
-
-impl ReaderOptions {
-    pub(super) fn validate(&self) -> Result<()> {
-        if self.batch_size == 0
-            || self.max_record_bytes == 0
-            || self.max_record_bytes.checked_add(1).is_none()
-            || self.max_batch_bytes < self.max_record_bytes
-            || !(1..u16::MAX as usize).contains(&self.max_depth)
-        {
-            return Err(ReadError::Configuration("positive batch/record limits, max_batch_bytes >= max_record_bytes, and max_depth in 1..65535 are required".into()));
-        }
-        Ok(())
     }
 }
