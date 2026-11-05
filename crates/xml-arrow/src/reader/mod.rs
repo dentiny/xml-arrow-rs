@@ -41,8 +41,6 @@ impl<'a> XmlReader<'a> {
     ) -> Result<Self> {
         let state = ReaderState::new(input, schema, record_path, options)?;
         let schema = state.schema();
-        // try_unfold retains its in-flight future across Stream::poll_next calls.
-        // Cancellation of next_batch must not drop quick-xml's partial event.
         let batches = stream::try_unfold(state, |mut state| async move {
             Ok(state.next_batch().await?.map(|batch| (batch, state)))
         })
