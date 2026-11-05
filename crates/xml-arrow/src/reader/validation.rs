@@ -47,3 +47,12 @@ pub(super) fn validate_reader(
     }
     Ok(names)
 }
+
+pub(super) fn validate_inference(options: &super::InferenceOptions) -> Result<()> {
+    if options.max_records == 0 || options.max_bytes == 0 {
+        return Err(ReadError::Configuration(
+            "inference record and byte limits must be positive".into(),
+        ));
+    }
+    Ok(())
+}

@@ -1,7 +1,8 @@
 #![deny(missing_docs)]
-//! Convert XML records to Arrow batches with an explicit schema.
+//! Convert XML records to Arrow batches with explicit or inferred schemas.
 //!
 //! Use [`XmlBatchBuilder`] for record elements and [`XmlReader`] for documents.
+//! [`XmlReader::infer`] samples a document to infer its schema.
 //!
 //! ```
 //! # fn main() -> xml_arrow::Result<()> {
@@ -75,4 +76,4 @@ pub use batch::XmlBatchBuilder;
 pub use error::{Error, Result};
 pub use schema::{XmlField, XmlSchema};
 
-pub use reader::{Limit, ReadError, ReaderOptions, ReaderResult, XmlReader};
+pub use reader::{InferenceOptions, Limit, ReadError, ReaderOptions, ReaderResult, XmlReader};

@@ -147,3 +147,38 @@ but cannot represent an individual value exceeding that format limit.
 
 `flush` returns the pending batch and resets the builder. An empty flush returns
 `None`. Flush may emit fewer than `batch_size` rows.
+
+## Inference
+
+`XmlReader::infer` shares document validation, record selection, and XML limits
+with the explicit reader. Sampling is bounded by record count and serialized
+record bytes; sampled records and at most one lookahead record are replayed in
+source order, with their original offsets. Projection applies after inference
+and addresses the resulting field order. No matching records yields an empty
+schema and no batches.
+
+All inferred fields and list items are nullable. Missing fields and `xsi:nil`
+therefore need no guess about requiredness. Nil-only fields default to `Utf8`.
+A present empty scalar remains an empty string; when other samples establish a
+structured field, an empty element can represent that empty structure.
+
+Scalar inference trims XML whitespace to classify `true`/`false` as `Boolean`,
+then tries `Int64`, finite `Float64`, and finally `Utf8`. `0` and `1` are integers.
+Integer/float mixtures widen to `Float64`, with its normal precision limits;
+other scalar type mixtures widen to `Utf8`. Empty scalar values force `Utf8`.
+Text on an element with attributes uses a `.` child of type `Utf8`. Comments and
+processing instructions do not contribute text.
+
+Nested elements with attributes or child elements become structs. Repeated
+sibling elements become lists using the existing unwrapped-list mapping.
+Attribute paths and output names use `@name`; namespaced paths use prefixes.
+Namespace identity follows URI, not input prefix spelling. Explicit bindings
+supply prefixes for their URIs; when several aliases name one URI, the smallest
+prefix is used. Other sampled URIs receive `ns0`, `ns1`, etc. in URI order,
+avoiding assigned prefixes. Fields sort by URI (no namespace first), then name.
+
+Scalar/struct conflicts and mixed text with child elements fail inference.
+The resulting schema is fixed: later new fields and other unmapped content are
+ignored. Values that violate inferred mappings, such as invalid numeric text or
+repetition of a scalar, return conversion errors. The unfinished output batch is
+discarded, as with explicit conversion errors.

@@ -32,3 +32,25 @@ impl Default for ReaderOptions {
         }
     }
 }
+
+const DEFAULT_MAX_SAMPLE_RECORDS: usize = 128;
+const DEFAULT_MAX_SAMPLE_BYTES: usize = 8 * 1024 * 1024;
+
+/// Bounds the records retained for schema inference.
+#[derive(Clone, Debug)]
+pub struct InferenceOptions {
+    /// Maximum sampled records. Default: 128.
+    pub max_records: usize,
+    /// Maximum sampled serialized XML bytes. Default: 8 MiB.
+    /// One additional record may be read ahead, bounded by `max_record_bytes`.
+    pub max_bytes: usize,
+}
+
+impl Default for InferenceOptions {
+    fn default() -> Self {
+        Self {
+            max_records: DEFAULT_MAX_SAMPLE_RECORDS,
+            max_bytes: DEFAULT_MAX_SAMPLE_BYTES,
+        }
+    }
+}

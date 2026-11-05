@@ -4,8 +4,8 @@ A Rust library for converting XML records into Apache Arrow `RecordBatch` values
 Column names, XML paths, types, and nullability are explicit. Storage access is
 separate from XML parsing and conversion.
 
-This checkout implements **milestones 1–4: explicit conversion, asynchronous
-document reading, and storage inputs**. See [MILESTONES.md](MILESTONES.md) for the roadmap.
+This checkout implements **milestones 1–5: explicit conversion, asynchronous
+document reading, storage inputs, and bounded schema inference**. See [MILESTONES.md](MILESTONES.md) for the roadmap.
 
 ## Convert records
 
@@ -97,8 +97,7 @@ scalars, structs, or other lists.
 - Inputs are decoded Rust strings; declaration metadata does not change decoding.
 - Namespace URI matching and nullable elements via `xsi:nil`.
 - DTDs and custom entities are not supported.
-- No automatic schema inference, CLI, CI, or built-in
-  IPC/Parquet export at this stage.
+- No CLI, CI, or built-in IPC/Parquet export at this stage.
 
 `XmlBatchBuilder` limits **rows, not bytes**. Callers supply complete records in memory;
 the converter builds a read-only tree for one record during conversion, then
@@ -133,6 +132,36 @@ no matching records returns `None`.
 Limits apply to skipped content too. Batch bytes count serialized records with
 inherited namespaces, with at most one lookahead record; caller buffers may
 read ahead. These are input limits, not Arrow allocation or RSS limits.
+
+## Infer a schema
+
+`XmlReader::infer(input, record_path, bindings, reader_options, inference_options)`
+samples complete records, fixes the schema, then replays the sample before reading
+more input. It works without seek or reopening storage. Namespace bindings have
+the same meaning as in `XmlSchema::with_namespaces`; pass `&[]` when unused.
+
+```sh
+cargo run --example infer -p xml-arrow
+```
+
+`InferenceOptions` defaults to 128 records and 8 MiB of sampled serialized XML,
+including inherited namespaces. Both limits must be positive. Sampling stops at
+either limit; a record that would exceed the byte budget is retained for replay
+but excluded from inference. At most one such record is read ahead, bounded by
+`ReaderOptions::max_record_bytes`. If the first record exceeds the sample budget,
+inference returns `Limit::SampleBytes`. These bounds cover retained record XML,
+not total I/O, Arrow allocations, or RSS; skipped content can still be read.
+
+Inferred fields are nullable and ordered by namespace URI and local name.
+Attribute names start with `@`; text-only records use `.`. Nested elements become
+structs, and elements repeated within a sampled parent become lists. Unwrapped
+lists use `.` as their container, so absent items become `[]`. Fields discovered
+after sampling are ignored, as with explicit mappings. Known fields retain their
+inferred types; incompatible later values fail during conversion.
+
+See the [inference rules](docs/schema.md#inference) for merging and namespace rules.
+Cancelling the inference constructor drops its input; returned readers retain the
+usual cancellation/resume behavior of `next_batch`.
 
 ## Open storage inputs
 

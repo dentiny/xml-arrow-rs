@@ -6,6 +6,8 @@ pub type Result<T> = std::result::Result<T, ReadError>;
 /// XML input limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Limit {
+    /// Serialized XML bytes retained for inference.
+    SampleBytes,
     /// Document element depth.
     Depth,
     /// Record bytes, including inherited namespaces.
@@ -51,6 +53,13 @@ pub enum ReadError {
 }
 
 impl ReadError {
+    pub(super) fn configuration(error: crate::Error) -> Self {
+        Self::Configuration(match error {
+            crate::Error::Configuration(message) => message,
+            error => error.to_string(),
+        })
+    }
+
     pub(super) fn xml(byte_offset: u64, source: impl Error + Send + Sync + 'static) -> Self {
         Self::Xml {
             byte_offset,

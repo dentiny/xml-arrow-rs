@@ -312,3 +312,33 @@ mod streaming {
         assert_eq!(device_count, 16);
     }
 }
+
+#[test]
+fn infers_schema_from_real_maven_dependencies() {
+    use futures_util::{io::Cursor, TryStreamExt};
+    use xml_arrow::{InferenceOptions, ReaderOptions, XmlReader};
+    futures_executor::block_on(async {
+        let reader = XmlReader::infer(
+            Cursor::new(POM.as_bytes()),
+            "/m:project/m:dependencyManagement/m:dependencies/m:dependency",
+            &[("m", "http://maven.apache.org/POM/4.0.0")],
+            ReaderOptions::default(),
+            InferenceOptions::default(),
+        )
+        .await
+        .unwrap();
+        let batches: Vec<_> = reader.into_stream().try_collect().await.unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].num_rows(), 7);
+        let artifacts = batches[0]
+            .column_by_name("m:artifactId")
+            .unwrap()
+            .as_string::<i32>();
+        assert_eq!(artifacts.value(0), "jackson-bom");
+        assert_eq!(artifacts.value(6), "junit-jupiter");
+        assert_eq!(
+            batches[0].column_by_name("m:scope").unwrap().null_count(),
+            6
+        );
+    });
+}

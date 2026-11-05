@@ -8,12 +8,13 @@ use futures_util::{
 };
 
 mod error;
+mod inference;
 mod options;
 mod state;
 mod validation;
 
 pub use error::{Limit, ReadError, Result as ReaderResult};
-pub use options::ReaderOptions;
+pub use options::{InferenceOptions, ReaderOptions};
 
 use error::Result;
 use state::ReaderState;
@@ -39,13 +40,35 @@ impl<'a> XmlReader<'a> {
         record_path: &str,
         options: ReaderOptions,
     ) -> Result<Self> {
-        let state = ReaderState::new(input, schema, record_path, options)?;
+        Ok(Self::from_state(ReaderState::new(
+            input,
+            schema,
+            record_path,
+            options,
+        )?))
+    }
+
+    /// Infers a fixed schema from a bounded sample, then replays sampled records.
+    /// Bindings resolve record-path prefixes; other namespaces get generated prefixes.
+    pub async fn infer<R: AsyncBufRead + Unpin + Send + 'a>(
+        input: R,
+        record_path: &str,
+        bindings: &[(&str, &str)],
+        options: ReaderOptions,
+        sampling: InferenceOptions,
+    ) -> Result<Self> {
+        Ok(Self::from_state(
+            ReaderState::infer(input, record_path, bindings, options, sampling).await?,
+        ))
+    }
+
+    fn from_state<R: AsyncBufRead + Unpin + Send + 'a>(state: ReaderState<R>) -> Self {
         let schema = state.schema();
         let batches = stream::try_unfold(state, |mut state| async move {
             Ok(state.next_batch().await?.map(|batch| (batch, state)))
         })
         .boxed();
-        Ok(Self { batches, schema })
+        Self { batches, schema }
     }
 
     /// Projected output schema.
