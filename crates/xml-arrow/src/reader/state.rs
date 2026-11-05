@@ -77,6 +77,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
     pub(super) async fn infer(
         input: R,
         path: &str,
+        // (Namespace prefix, namespace URI) pairs.
         bindings: &[(&str, &str)],
         options: ReaderOptions,
         sampling: InferenceOptions,

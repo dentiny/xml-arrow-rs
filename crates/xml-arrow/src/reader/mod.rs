@@ -53,6 +53,7 @@ impl<'a> XmlReader<'a> {
     pub async fn infer<R: AsyncBufRead + Unpin + Send + 'a>(
         input: R,
         record_path: &str,
+        // (Namespace prefix, namespace URI) pairs.
         bindings: &[(&str, &str)],
         options: ReaderOptions,
         sampling: InferenceOptions,
