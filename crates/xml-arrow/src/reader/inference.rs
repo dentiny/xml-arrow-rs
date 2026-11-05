@@ -5,7 +5,9 @@ use roxmltree::Node;
 
 use crate::{parse::is_nil, Error, Result, XmlField, XmlSchema};
 
+// (Optional namespace URI, local name); attributes use "@name", text uses ".".
 type Name = (Option<String>, String);
+// Key: XML name. Value: inferred type and repetition.
 type Fields = BTreeMap<Name, Shape>;
 
 #[derive(Default)]
