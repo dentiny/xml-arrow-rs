@@ -69,6 +69,38 @@ async fn local_paths_and_file_urls_reopen_without_creating_missing_directories()
 }
 
 #[tokio::test]
+async fn parent_segments_resolve_at_open_and_follow_symlinks() {
+    let cwd = std::env::current_dir().unwrap();
+    let directory = tempfile::tempdir_in(&cwd).unwrap();
+    let child = directory.path().join("child");
+    std::fs::create_dir(&child).unwrap();
+    let path = child.join("../books.xml");
+    let files = [
+        XmlFile::from_uri(path.to_str().unwrap()).unwrap(),
+        XmlFile::from_uri(path.strip_prefix(&cwd).unwrap().to_str().unwrap()).unwrap(),
+    ];
+    std::fs::write(directory.path().join("books.xml"), XML).unwrap();
+    for file in files {
+        assert_eq!(ids(file.open().await.unwrap()).await, [1, 2]);
+    }
+    let missing = directory.path().join("missing");
+    let file = XmlFile::from_uri(missing.join("../absent.xml").to_str().unwrap()).unwrap();
+    assert!(bytes(&file).await.is_err());
+    assert!(!missing.exists());
+
+    #[cfg(unix)]
+    {
+        let target = directory.path().join("target");
+        std::fs::create_dir_all(target.join("child")).unwrap();
+        std::fs::write(target.join("books.xml"), "<root><row id='3'/></root>").unwrap();
+        let link = directory.path().join("link");
+        std::os::unix::fs::symlink(target.join("child"), &link).unwrap();
+        let file = XmlFile::from_uri(link.join("../books.xml").to_str().unwrap()).unwrap();
+        assert_eq!(ids(file.open().await.unwrap()).await, [3]);
+    }
+}
+
+#[tokio::test]
 async fn configured_operator_preserves_its_root_and_returns_independent_streams() {
     let operator = Operator::new(Memory::default().root("project")).unwrap();
     let chunks: opendal::Buffer = [&XML[..17], &XML[17..23], &XML[23..]]

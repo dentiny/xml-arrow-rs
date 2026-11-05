@@ -18,6 +18,6 @@ thiserror = "2"
 opendal = { version = "0.59.3", default-features = false, features = ["services-fs"] }
 futures-executor = "0.3"
 url = "2"
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["fs", "macros", "rt"] }
 tempfile = "3"
 xml-arrow = { path = "crates/xml-arrow", version = "0.1.0" }

@@ -171,6 +171,8 @@ usual cancellation/resume behavior of `next_batch`.
 `xml-io` handles storage access and returns byte readers; it has no production
 dependency on `xml-arrow`. `XmlFile::from_uri` accepts local paths and file URLs.
 Relative paths are made absolute at construction, without opening the input.
+Local paths containing `..` are resolved through the filesystem when opened,
+preserving traversal through symlinks. `source_uri()` keeps the absolute input path.
 Each `open()` starts an independent stream; object access errors can occur on
 open or during reading. Local filesystem reads require a Tokio runtime.
 

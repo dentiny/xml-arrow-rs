@@ -1,4 +1,7 @@
-use std::{borrow::Cow, io, path::Path};
+use std::{
+    io,
+    path::{Component, Path},
+};
 
 use url::Url;
 
@@ -41,8 +44,16 @@ pub(super) fn validate_local_path(uri: &str) -> io::Result<String> {
     Ok(path)
 }
 
-pub(super) fn local_path_parts(absolute: &str) -> io::Result<(&str, Cow<'_, str>)> {
-    let absolute = Path::new(absolute);
+pub(super) async fn validate_local_path_parts(absolute: &str) -> io::Result<(String, String)> {
+    let absolute = if Path::new(absolute)
+        .components()
+        .any(|part| part == Component::ParentDir)
+    {
+        // Preserve filesystem traversal through symlinks before resolving `..`.
+        tokio::fs::canonicalize(absolute).await?
+    } else {
+        absolute.into()
+    };
     let root = absolute
         .ancestors()
         .last()
@@ -55,8 +66,8 @@ pub(super) fn local_path_parts(absolute: &str) -> io::Result<(&str, Cow<'_, str>
         .to_str()
         .ok_or_else(|| invalid("local root must be UTF-8"))?;
     #[cfg(windows)]
-    let path = Cow::Owned(path.replace('\\', "/"));
+    let path = path.replace('\\', "/");
     #[cfg(not(windows))]
-    let path = Cow::Borrowed(path);
-    Ok((root, path))
+    let path = path.to_owned();
+    Ok((root.to_owned(), path))
 }
