@@ -2,7 +2,8 @@
 
 use std::{borrow::Cow, io};
 
-use opendal::{services::Fs, FuturesAsyncReader, Operator};
+use futures_util::{io::AsyncBufRead, TryStreamExt};
+use opendal::{services::Fs, Operator};
 
 use crate::validation::{local_path_parts, validate_local_path, validate_object_path};
 
@@ -48,7 +49,7 @@ impl XmlFile {
     }
 
     /// Opens a new byte stream.
-    pub async fn open(&self) -> io::Result<FuturesAsyncReader> {
+    pub async fn open(&self) -> io::Result<impl AsyncBufRead + Unpin + Send> {
         let (operator, path) = match &self.operator {
             Some(operator) => (operator.clone(), Cow::Borrowed(self.path.as_str())),
             None => {
@@ -61,7 +62,8 @@ impl XmlFile {
         Ok(operator
             .reader(&path)
             .await?
-            .into_futures_async_read(..)
-            .await?)
+            .into_bytes_stream(..)
+            .await?
+            .into_async_read())
     }
 }

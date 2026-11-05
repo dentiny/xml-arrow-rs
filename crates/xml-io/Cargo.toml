@@ -7,11 +7,11 @@ license.workspace = true
 readme = "../../README.md"
 
 [dependencies]
+futures-util.workspace = true
 opendal.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-futures-util.workspace = true
 xml-arrow.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true

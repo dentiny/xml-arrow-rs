@@ -71,7 +71,11 @@ async fn local_paths_and_file_urls_reopen_without_creating_missing_directories()
 #[tokio::test]
 async fn configured_operator_preserves_its_root_and_returns_independent_streams() {
     let operator = Operator::new(Memory::default().root("project")).unwrap();
-    operator.write("data.xml", XML).await.unwrap();
+    let chunks: opendal::Buffer = [&XML[..17], &XML[17..23], &XML[23..]]
+        .into_iter()
+        .flat_map(opendal::Buffer::from)
+        .collect();
+    operator.write("data.xml", chunks).await.unwrap();
     let file = XmlFile::new(operator.clone(), "data.xml").unwrap();
     assert_eq!(file.source_uri(), "data.xml");
     let mut first = file.open().await.unwrap();
