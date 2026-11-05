@@ -2,7 +2,8 @@
 //! Convert individual XML records to Apache Arrow with an explicit schema.
 //!
 //! Each call to [`XmlBatchBuilder::append_xml`] supplies one complete XML
-//! element. Paths are relative to that element. This crate performs no I/O.
+//! element. Paths are relative to that element. [`XmlReader`] selects records
+//! from an asynchronous byte reader; storage access belongs in `xml-io`.
 //!
 //! ```
 //! # fn main() -> xml_arrow::Result<()> {
@@ -41,13 +42,39 @@
 //! # }
 //! ```
 
+//! Asynchronous document reading:
+//!
+//! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use arrow_schema::DataType;
+//! use futures_util::io::Cursor;
+//! use xml_arrow::{ReaderOptions, XmlField, XmlReader, XmlSchema};
+//! let schema = XmlSchema::new(vec![
+//!     XmlField::new("id", "@id", DataType::Int64, false),
+//! ])?;
+//! let mut reader = XmlReader::new(
+//!     Cursor::new(b"<rows><row id='1'/><row id='2'/></rows>"),
+//!     schema, "/rows/row", ReaderOptions::default(),
+//! )?;
+//! futures_executor::block_on(async {
+//!     assert_eq!(reader.next_batch().await?.unwrap().num_rows(), 2);
+//!     assert!(reader.next_batch().await?.is_none());
+//!     xml_arrow::ReaderResult::Ok(())
+//! })?;
+//! # Ok(())
+//! # }
+//! ```
+
 mod batch;
 mod builders;
 mod error;
 mod parse;
+mod reader;
 mod schema;
 mod validation;
 
 pub use batch::XmlBatchBuilder;
 pub use error::{Error, Result};
 pub use schema::{XmlField, XmlSchema};
+
+pub use reader::{Limit, ReadError, ReaderOptions, ReaderResult, XmlReader};

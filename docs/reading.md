@@ -1,10 +1,11 @@
 # Asynchronous document reading
 
-`xml_io::XmlReader::new(input, schema, record_path, options)` accepts one UTF-8
+`xml_arrow::XmlReader::new(input, schema, record_path, options)` accepts one UTF-8
 XML document through `futures::io::AsyncBufRead + Unpin + Send`. Wrap an unbuffered
 async reader in `futures_util::io::BufReader`. Input may borrow data for the
 reader's lifetime. Construction validates configuration without consuming input.
-It does not require a Tokio runtime: `tokio-util` only adapts the input traits to
+Storage access belongs in the future `xml-io` crate; this reader only consumes
+the supplied bytes. It does not require a Tokio runtime: `tokio-util` only adapts the input traits to
 quick-xml's asynchronous parser.
 
 `next_batch().await` returns `Result<Option<RecordBatch>>`. `into_stream()` returns
@@ -21,7 +22,7 @@ by URI, independently of source prefixes. Unprefixed steps select names without
 a namespace. For a default-namespaced document, bind its URI to a schema prefix
 and use that prefix in the record path.
 
-quick-xml frames records incrementally. Each selected element is serialized with
+quick-xml reads XML events incrementally and selects complete record elements. Each selected element is serialized with
 its inherited namespace declarations, then converted by `xml-arrow` using
 roxmltree. Skipped tokens are also validated with roxmltree, which checks XML
 names, characters, attributes, and references beyond quick-xml's structural

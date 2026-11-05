@@ -43,7 +43,7 @@ pub enum ReadError {
         /// Byte offset of the selected record's opening tag.
         byte_offset: u64,
         /// Original conversion error, including field name and path if available.
-        source: xml_arrow::Error,
+        source: crate::Error,
     },
 }
 

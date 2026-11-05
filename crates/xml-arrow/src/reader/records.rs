@@ -3,6 +3,7 @@ use std::{
     io::{self, Write},
 };
 
+use crate::{validation::valid_name, XmlSchema};
 use futures_util::io::{AsyncBufRead, AsyncReadExt, Chain, Cursor, Take};
 use quick_xml::{
     events::{attributes::Attribute, BytesEnd, BytesStart, Event},
@@ -11,9 +12,8 @@ use quick_xml::{
     Writer, XmlVersion,
 };
 use tokio_util::compat::{Compat, FuturesAsyncReadCompatExt};
-use xml_arrow::XmlSchema;
 
-use crate::{Limit, ReadError, ReaderOptions, Result};
+use super::{error::Result, Limit, ReadError, ReaderOptions};
 
 #[derive(PartialEq, Eq)]
 struct Name {
@@ -33,7 +33,7 @@ struct Capture {
 
 type Input<R> = Compat<Take<Chain<Cursor<Vec<u8>>, R>>>;
 
-pub(crate) struct Framer<R> {
+pub(crate) struct RecordReader<R> {
     reader: NsReader<Input<R>>,
     buffer: Vec<u8>,
     path: Vec<Name>,
@@ -42,10 +42,11 @@ pub(crate) struct Framer<R> {
     root_seen: bool,
     initialized: bool,
     bom_bytes: u64,
-    options: ReaderOptions,
+    max_record_bytes: usize,
+    max_depth: usize,
 }
 
-impl<R: AsyncBufRead + Unpin> Framer<R> {
+impl<R: AsyncBufRead + Unpin> RecordReader<R> {
     pub fn new(input: R, schema: &XmlSchema, path: &str, options: &ReaderOptions) -> Result<Self> {
         let mut names = Vec::new();
         let path = path.strip_prefix('/').ok_or_else(|| {
@@ -56,22 +57,20 @@ impl<R: AsyncBufRead + Unpin> Framer<R> {
                 Some((prefix, local)) => (
                     Some(
                         schema
-                            .namespace_uri(prefix)
+                            .namespaces
+                            .get(prefix)
                             .ok_or_else(|| {
                                 ReadError::Configuration(format!(
                                     "unbound record path prefix {prefix:?}"
                                 ))
                             })?
-                            .to_owned(),
+                            .clone(),
                     ),
                     local,
                 ),
                 None => (None, part),
             };
-            if local.contains(':')
-                || !roxmltree::Document::parse(&format!("<{local}/>"))
-                    .is_ok_and(|doc| doc.root_element().tag_name().name() == local)
-            {
+            if !valid_name(local) {
                 return Err(ReadError::Configuration(format!(
                     "invalid record path segment {part:?}"
                 )));
@@ -98,7 +97,8 @@ impl<R: AsyncBufRead + Unpin> Framer<R> {
             root_seen: false,
             initialized: false,
             bom_bytes: 0,
-            options: options.clone(),
+            max_record_bytes: options.max_record_bytes,
+            max_depth: options.max_depth,
         })
     }
 
@@ -131,13 +131,11 @@ impl<R: AsyncBufRead + Unpin> Framer<R> {
             // Take bounds parser allocations even for a huge unselected text,
             // comment, or tag. One extra byte distinguishes a full token from a
             // token which needs to peek at its following delimiter.
-            let allowance = self.options.max_record_bytes as u64 + 1;
+            let allowance = self.max_record_bytes as u64 + 1;
             self.reader.get_mut().get_mut().set_limit(allowance);
             let event = self.reader.read_event_into_async(&mut self.buffer).await;
-            if allowance - self.reader.get_mut().get_mut().limit()
-                > self.options.max_record_bytes as u64
-            {
-                return Err(self.limit(Limit::EventBytes, self.options.max_record_bytes));
+            if allowance - self.reader.get_mut().get_mut().limit() > self.max_record_bytes as u64 {
+                return Err(self.limit(Limit::EventBytes, self.max_record_bytes));
             }
             let event = event
                 .map_err(|source| {
@@ -161,7 +159,7 @@ impl<R: AsyncBufRead + Unpin> Framer<R> {
                             self.capture = Some(Capture {
                                 writer: Writer::new(BoundedBuffer {
                                     bytes: Vec::new(),
-                                    limit: self.options.max_record_bytes,
+                                    limit: self.max_record_bytes,
                                 }),
                                 byte_offset: before,
                             });
@@ -237,8 +235,8 @@ impl<R: AsyncBufRead + Unpin> Framer<R> {
     }
 
     fn enter(&mut self, name: QName<'_>) -> Result<()> {
-        if self.stack.len() == self.options.max_depth {
-            return Err(self.limit(Limit::Depth, self.options.max_depth));
+        if self.stack.len() == self.max_depth {
+            return Err(self.limit(Limit::Depth, self.max_depth));
         }
         if self.stack.is_empty() {
             if self.root_seen {
@@ -290,7 +288,12 @@ impl<R: AsyncBufRead + Unpin> Framer<R> {
                 PrefixDeclaration::Named(prefix) => [b"xmlns:".as_slice(), prefix].concat(),
             };
             if !keys.contains(&key) {
-                start.push_attribute((key.as_slice(), uri.into_inner()));
+                // Bindings already contain XML escapes. Protect the output
+                // quote without double-escaping references such as &amp;.
+                let value = std::str::from_utf8(uri.into_inner())
+                    .map_err(|source| ReadError::xml(self.position(), source))?
+                    .replace('"', "&quot;");
+                start.push_attribute((key.as_slice(), value.as_bytes()));
             }
         }
         Ok(start)
@@ -305,7 +308,7 @@ impl<R: AsyncBufRead + Unpin> Framer<R> {
             .write_event(event)
             .map_err(|_| ReadError::LimitExceeded {
                 kind: Limit::RecordBytes,
-                limit: self.options.max_record_bytes,
+                limit: self.max_record_bytes,
                 byte_offset: position,
             })
     }
@@ -367,12 +370,12 @@ struct BoundedBuffer {
 }
 
 impl Write for BoundedBuffer {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if bytes.len() > self.limit - self.bytes.len() {
+    fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+        if input.len() > self.limit - self.bytes.len() {
             return Err(io::Error::other("XML record exceeds byte limit"));
         }
-        self.bytes.extend_from_slice(bytes);
-        Ok(bytes.len())
+        self.bytes.extend_from_slice(input);
+        Ok(input.len())
     }
     fn flush(&mut self) -> io::Result<()> {
         Ok(())

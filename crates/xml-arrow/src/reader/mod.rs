@@ -1,3 +1,4 @@
+use crate::{XmlBatchBuilder, XmlSchema};
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use futures_util::{
@@ -5,12 +6,16 @@ use futures_util::{
     stream::{self, BoxStream},
     StreamExt, TryStreamExt,
 };
-use xml_arrow::{XmlBatchBuilder, XmlSchema};
 
-use crate::{
-    framing::{Framer, Record},
-    ReadError, ReaderOptions, Result,
-};
+mod error;
+mod options;
+mod records;
+
+pub use error::{Limit, ReadError, Result as ReaderResult};
+pub use options::ReaderOptions;
+
+use error::Result;
+use records::{Record, RecordReader};
 
 /// Reads one XML document as batches of elements selected by an absolute path.
 ///
@@ -34,17 +39,22 @@ impl<'a> XmlReader<'a> {
         options: ReaderOptions,
     ) -> Result<Self> {
         options.validate()?;
-        let framer = Framer::new(input, &schema, record_path, &options)?;
+        let records = RecordReader::new(input, &schema, record_path, &options)?;
         let builder = match options.projection.as_deref() {
             Some(indices) => XmlBatchBuilder::new_projected(schema, options.batch_size, indices),
             None => XmlBatchBuilder::new(schema, options.batch_size),
         }
-        .map_err(|error| ReadError::Configuration(error.to_string()))?;
+        .map_err(|error| {
+            ReadError::Configuration(match error {
+                crate::Error::Configuration(message) => message,
+                error => error.to_string(),
+            })
+        })?;
         let schema = builder.schema();
         let state = State {
-            framer,
+            records,
             builder,
-            options,
+            max_batch_bytes: options.max_batch_bytes,
             pending: None,
             record_index: 0,
             last_offset: 0,
@@ -76,9 +86,9 @@ impl<'a> XmlReader<'a> {
 }
 
 struct State<R> {
-    framer: Framer<R>,
+    records: RecordReader<R>,
     builder: XmlBatchBuilder,
-    options: ReaderOptions,
+    max_batch_bytes: usize,
     pending: Option<Record>,
     record_index: u64,
     last_offset: u64,
@@ -90,13 +100,13 @@ impl<R: AsyncBufRead + Unpin> State<R> {
         while !self.builder.is_full() {
             let record = match self.pending.take() {
                 Some(record) => Some(record),
-                None => self.framer.next_record().await?,
+                None => self.records.next_record().await?,
             };
             let Some(record) = record else {
                 break;
             };
             if !self.builder.is_empty()
-                && bytes.saturating_add(record.xml.len()) > self.options.max_batch_bytes
+                && bytes.saturating_add(record.xml.len()) > self.max_batch_bytes
             {
                 self.pending = Some(record);
                 break;

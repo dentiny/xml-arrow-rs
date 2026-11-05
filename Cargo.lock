@@ -614,21 +614,11 @@ version = "0.1.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
- "roxmltree",
-]
-
-[[package]]
-name = "xml-io"
-version = "0.1.0"
-dependencies = [
- "arrow-array",
- "arrow-schema",
  "futures-executor",
  "futures-util",
  "quick-xml",
  "roxmltree",
  "tokio-util",
- "xml-arrow",
 ]
 
 [[package]]

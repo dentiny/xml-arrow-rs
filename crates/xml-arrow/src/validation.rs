@@ -83,7 +83,7 @@ fn valid_path(path: &str, namespaces: &HashMap<String, String>) -> bool {
     })
 }
 
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     !name.contains(':')
         && roxmltree::Document::parse(&format!("<{name}/>"))
             .is_ok_and(|doc| doc.root_element().tag_name().name() == name)

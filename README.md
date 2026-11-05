@@ -1,8 +1,8 @@
 # xml-arrow-rs
 
 A Rust library for converting XML records into Apache Arrow `RecordBatch` values.
-Column names, XML paths, types, and nullability are explicit. Conversion performs
-no filesystem or network I/O.
+Column names, XML paths, types, and nullability are explicit. Storage access is
+separate from XML parsing and conversion.
 
 This checkout implements **milestones 1–3: explicit scalar/nested conversion and
 asynchronous document reading**. See [MILESTONES.md](MILESTONES.md) for the roadmap.
@@ -100,25 +100,25 @@ scalars, structs, or other lists.
 - No automatic schema inference, storage integration, CLI, CI, or built-in
   IPC/Parquet export at this stage.
 
-Batch size limits **rows, not bytes**. Callers supply complete records in memory;
+`XmlBatchBuilder` limits **rows, not bytes**. Callers supply complete records in memory;
 the converter builds a read-only tree for one record during conversion, then
-retains only the pending Arrow columns. This stage does not enforce application
-record-size or depth limits. `Utf8` and `List` use 32-bit offsets; exceeding their
+retains only the pending Arrow columns. The builder does not enforce application
+record-size or depth limits; `XmlReader` adds these limits. `Utf8` and `List` use 32-bit offsets; exceeding their
 format limits returns an error before any columns are changed.
 
 See the [schema contract](docs/schema.md) for exact conversion and error behavior.
 
 ## Read XML documents asynchronously
 
-`xml-io` selects records by an absolute element path and converts them with
-`xml-arrow`. Input implements `futures::io::AsyncBufRead + Unpin + Send`;
+`xml_arrow::XmlReader` selects records by an absolute element path and converts
+them into Arrow batches. Input implements
+`futures::io::AsyncBufRead + Unpin + Send`;
 no Tokio runtime is required.
 
 ```rust
 use arrow_schema::DataType;
 use futures_util::io::Cursor;
-use xml_arrow::{XmlField, XmlSchema};
-use xml_io::{ReaderOptions, XmlReader};
+use xml_arrow::{ReaderOptions, XmlField, XmlReader, XmlSchema};
 
 let schema = XmlSchema::new(vec![
     XmlField::new("id", "@id", DataType::Int64, false),
@@ -140,6 +140,9 @@ schema's namespace bindings and match by URI. The reader preserves inherited
 namespaces when extracting records. Cancelling a pending `next_batch()` call
 preserves parsing and pending rows; the first error ends the reader.
 
+The future `xml-io` crate will handle storage access and return byte readers.
+XML parsing, record selection, and Arrow conversion remain in `xml-arrow`.
+
 Defaults are 1024 rows, 8 MiB per record/event, 64 MiB of serialized input records
 per batch, and depth 128. These byte limits bound input accumulation; Arrow
 allocations depend on the schema. See the [reader contract](docs/reading.md).
@@ -159,7 +162,6 @@ read those complete XML files and verify their Arrow output offline:
 
 ```sh
 cargo test -p xml-arrow --test real_xml
-cargo test -p xml-io --test real_xml
 ```
 
 Licensed under [MIT](LICENSE).

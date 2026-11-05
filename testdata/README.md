@@ -40,12 +40,11 @@ when deliberately updating a fixture.
 - The topology test checks 2 CPUs, 8 bridges, 16 devices, nested list offsets,
   numeric attributes, device identifiers, and class values.
 
-`crates/xml-io/tests/real_xml.rs` reads the same files through `XmlReader` using
+The `streaming` module in that same test file reads the XML through `XmlReader` using
 7-byte input buffers. It selects each managed dependency or CPU as a record and
 checks batching, inherited namespaces, optional fields, and nested device lists.
 
-Run `cargo test -p xml-arrow --test real_xml`,
-`cargo test -p xml-io --test real_xml`, or `cargo test --workspace`.
+Run `cargo test -p xml-arrow --test real_xml`, or `cargo test --workspace`.
 Tests use the snapshots stored in Git and require no network access.
 
 These integration tests are checkout-only and excluded from the published crate

@@ -15,8 +15,7 @@ use futures_util::{
     io::{AsyncBufRead, AsyncRead, BufReader, Cursor},
     FutureExt, TryStreamExt,
 };
-use xml_arrow::{XmlField, XmlSchema};
-use xml_io::{Limit, ReadError, ReaderOptions, XmlReader};
+use xml_arrow::{Limit, ReadError, ReaderOptions, XmlField, XmlReader, XmlSchema};
 
 fn schema() -> XmlSchema {
     XmlSchema::new(vec![XmlField::new("id", "@id", Int64, false)]).unwrap()
@@ -145,6 +144,25 @@ fn split_tokens_utf8_and_namespace_context_survive_batch_boundaries() {
         assert_eq!(rest[0].column(0).as_string::<i32>().value(0), "");
         assert!(arrow_array::Array::is_null(rest[0].column(0).as_ref(), 0));
         assert_eq!(rest[0].column(1).as_primitive::<Int64Type>().value(0), 3);
+    });
+}
+
+#[test]
+fn inherited_namespace_cannot_inject_record_attributes() {
+    block_on(async {
+        let xml = r#"<root xmlns:p='urn:x" id="7'><row/></root>"#;
+        let mut reader = XmlReader::new(
+            Cursor::new(xml.as_bytes()),
+            schema(),
+            "/root/row",
+            ReaderOptions::default(),
+        )
+        .unwrap();
+        assert!(
+            matches!(reader.next_batch().await, Err(ReadError::Conversion {
+            source: xml_arrow::Error::Field { name, .. }, ..
+        }) if name == "id")
+        );
     });
 }
 

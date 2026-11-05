@@ -1,4 +1,9 @@
-use crate::{ReadError, Result};
+use super::{error::Result, ReadError};
+
+const DEFAULT_BATCH_SIZE: usize = 1024;
+const DEFAULT_MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
+const DEFAULT_MAX_BATCH_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_MAX_DEPTH: usize = 128;
 
 /// Batch sizing, projection, and input resource limits.
 #[derive(Clone, Debug)]
@@ -23,10 +28,10 @@ pub struct ReaderOptions {
 impl Default for ReaderOptions {
     fn default() -> Self {
         Self {
-            batch_size: 1024,
-            max_record_bytes: 8 * 1024 * 1024,
-            max_batch_bytes: 64 * 1024 * 1024,
-            max_depth: 128,
+            batch_size: DEFAULT_BATCH_SIZE,
+            max_record_bytes: DEFAULT_MAX_RECORD_BYTES,
+            max_batch_bytes: DEFAULT_MAX_BATCH_BYTES,
+            max_depth: DEFAULT_MAX_DEPTH,
             projection: None,
         }
     }
