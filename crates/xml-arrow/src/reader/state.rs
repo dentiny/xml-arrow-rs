@@ -1,7 +1,4 @@
-use std::{
-    borrow::Cow,
-    io::{self, Write},
-};
+use std::io::{self, Write};
 
 use crate::{validation::valid_name, XmlBatchBuilder, XmlSchema};
 use arrow_array::RecordBatch;
@@ -9,7 +6,7 @@ use arrow_schema::SchemaRef;
 use futures_util::io::{AsyncBufRead, AsyncReadExt, Chain, Cursor, Take};
 use quick_xml::{
     events::{attributes::Attribute, BytesEnd, BytesStart, Event},
-    name::{PrefixDeclaration, QName, ResolveResult},
+    name::{Namespace, PrefixDeclaration, QName},
     reader::NsReader,
     Writer, XmlVersion,
 };
@@ -33,8 +30,8 @@ struct Capture {
     byte_offset: u64,
 }
 
-// Cursor replays the initial bytes when they are not a BOM; Chain prepends them
-// to R. Take limits each event read; Compat adapts futures I/O for quick-xml.
+// Cursor exposes the whole three-byte prefix so quick-xml can handle a split BOM.
+// Take bounds each event; Compat adapts futures I/O for quick-xml.
 type Input<R> = Compat<Take<Chain<Cursor<Vec<u8>>, R>>>;
 
 /// Owns parsing and batching state for one XML document.
@@ -73,23 +70,16 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             ReadError::Configuration("record path must be absolute, e.g. /catalog/book".into())
         })?;
         for part in path.split('/') {
-            let (uri, local) = match part.split_once(':') {
-                Some((prefix, local)) => (
-                    Some(
-                        schema
-                            .namespaces
-                            .get(prefix)
-                            .ok_or_else(|| {
-                                ReadError::Configuration(format!(
-                                    "unbound record path prefix {prefix:?}"
-                                ))
-                            })?
-                            .clone(),
-                    ),
-                    local,
-                ),
-                None => (None, part),
-            };
+            let (prefix, local) = part
+                .split_once(':')
+                .map_or((None, part), |(prefix, local)| (Some(prefix), local));
+            let uri = prefix
+                .map(|prefix| {
+                    schema.namespaces.get(prefix).cloned().ok_or_else(|| {
+                        ReadError::Configuration(format!("unbound record path prefix {prefix:?}"))
+                    })
+                })
+                .transpose()?;
             if !valid_name(local) {
                 return Err(ReadError::Configuration(format!(
                     "invalid record path segment {part:?}"
@@ -176,28 +166,17 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
     }
 
     async fn next_record(&mut self, buffer: &mut Vec<u8>) -> Result<Option<Record>> {
-        // A successful call consumes a complete record, so only the first call
-        // can begin at parser position zero. No separate initialization flag.
         if self.reader.buffer_position() == 0 {
-            // quick-xml's BOM removal requires three bytes in one fill_buf.
-            // Read the prefix explicitly so single-byte buffers work too.
+            // Expose all three BOM bytes together, even for one-byte inputs.
             let (prefix, input) = self.reader.get_mut().get_mut().get_mut().get_mut();
-            let mut head = [0; 3];
-            let mut len = 0;
-            while len < head.len() {
-                let n = input
-                    .read(&mut head[len..])
-                    .await
-                    .map_err(|source| ReadError::xml(len as u64, source))?;
-                if n == 0 {
-                    break;
-                }
-                len += n;
-            }
-            self.bom_bytes = if head == [0xEF, 0xBB, 0xBF] {
+            input
+                .take(3)
+                .read_to_end(prefix.get_mut())
+                .await
+                .map_err(|source| ReadError::xml(prefix.get_ref().len() as u64, source))?;
+            self.bom_bytes = if prefix.get_ref() == b"\xEF\xBB\xBF" {
                 3
             } else {
-                *prefix = Cursor::new(head[..len].to_vec());
                 0
             };
         }
@@ -208,12 +187,17 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             // Take bounds parser allocations even for a huge unselected text,
             // comment, or tag. One extra byte distinguishes a full token from a
             // token which needs to peek at its following delimiter.
-            let allowance = self.options.max_record_bytes as u64 + 1;
+            // quick-xml consumes the BOM separately from its first XML event.
+            let bom = if self.reader.buffer_position() == 0 {
+                self.bom_bytes
+            } else {
+                0
+            };
+            let limit = (self.options.max_record_bytes as u64).saturating_add(bom);
+            let allowance = limit.saturating_add(1);
             self.reader.get_mut().get_mut().set_limit(allowance);
             let event = self.reader.read_event_into_async(buffer).await;
-            if allowance - self.reader.get_mut().get_mut().limit()
-                > self.options.max_record_bytes as u64
-            {
+            if allowance - self.reader.get_mut().get_mut().limit() > limit {
                 return Err(self.limit(Limit::EventBytes, self.options.max_record_bytes));
             }
             let event = event
@@ -223,59 +207,28 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                 .into_owned();
             buffer.clear();
             let empty = matches!(event, Event::Empty(_));
-            match event {
+            let closes = empty || matches!(event, Event::End(_));
+            let event = match event {
                 Event::Start(start) | Event::Empty(start) => {
                     self.enter(start.name())?;
-                    if let Some(record) = &mut capture {
-                        record.write(
-                            if empty {
-                                Event::Empty(start)
-                            } else {
-                                Event::Start(start)
-                            },
-                            self.position(),
-                        )?;
+                    let start = if capture.is_none() {
+                        self.with_namespaces(start)?
                     } else {
-                        let start = self.with_namespaces(start)?;
-                        if self.stack == self.path {
-                            let mut record = Capture {
-                                writer: Writer::new(BoundedBuffer {
-                                    bytes: Vec::new(),
-                                    limit: self.options.max_record_bytes,
-                                }),
-                                byte_offset: before,
-                            };
-                            record.write(
-                                if empty {
-                                    Event::Empty(start)
-                                } else {
-                                    Event::Start(start)
-                                },
-                                self.position(),
-                            )?;
-                            capture = Some(record);
-                        } else {
-                            self.validate(Event::Empty(start), before)?;
-                        }
+                        start
+                    };
+                    if capture.is_none() && self.stack == self.path {
+                        capture = Some(Capture {
+                            writer: Writer::new(BoundedBuffer {
+                                bytes: Vec::new(),
+                                limit: self.options.max_record_bytes,
+                            }),
+                            byte_offset: before,
+                        });
                     }
                     if empty {
-                        let complete = capture.is_some() && self.stack.len() == self.path.len();
-                        self.stack.pop();
-                        if complete {
-                            return capture.unwrap().finish().map(Some);
-                        }
-                    }
-                }
-                Event::End(end) => {
-                    if let Some(record) = &mut capture {
-                        record.write(Event::End(end), self.position())?;
-                        let complete = self.stack.len() == self.path.len();
-                        self.stack.pop();
-                        if complete {
-                            return capture.unwrap().finish().map(Some);
-                        }
+                        Event::Empty(start)
                     } else {
-                        self.stack.pop();
+                        Event::Start(start)
                     }
                 }
                 Event::DocType(_) => {
@@ -287,34 +240,22 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                     }
                     return Ok(None);
                 }
-                Event::Decl(decl) => {
-                    if before != self.bom_bytes {
-                        return Err(
-                            self.invalid(before, "XML declaration must be at the beginning")
-                        );
-                    }
-                    self.validate(Event::Decl(decl), before)?;
+                Event::Decl(_) if before != self.bom_bytes => {
+                    return Err(self.invalid(before, "XML declaration must be at the beginning"));
                 }
-                event => {
-                    if let Some(record) = &mut capture {
-                        record.write(event, self.position())?;
-                    } else {
-                        if self.stack.is_empty() {
-                            match &event {
-                                Event::Text(text)
-                                    if text.as_ref().iter().all(|byte| {
-                                        matches!(byte, b' ' | b'\t' | b'\r' | b'\n')
-                                    }) => {}
-                                Event::Comment(_) | Event::PI(_) => {}
-                                _ => {
-                                    return Err(self
-                                        .invalid(before, "content outside the document element"))
-                                }
-                            }
-                        }
-                        self.validate(event, before)?;
-                    }
-                }
+                event => event,
+            };
+            if let Some(record) = &mut capture {
+                record.write(event, self.position())?;
+            } else if !matches!(event, Event::End(_)) {
+                self.validate(event, before)?;
+            }
+            let complete = closes && capture.is_some() && self.stack.len() == self.path.len();
+            if closes {
+                self.stack.pop();
+            }
+            if complete {
+                return capture.unwrap().finish().map(Some);
             }
         }
     }
@@ -330,30 +271,16 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             self.root_seen = true;
         }
         let (namespace, local) = self.reader.resolver().resolve_element(name);
-        let uri = match namespace {
-            ResolveResult::Unbound => None,
-            ResolveResult::Bound(uri) => {
-                let attr = Attribute {
-                    key: QName(b"xmlns"),
-                    value: Cow::Borrowed(uri.into_inner()),
-                };
-                Some(
-                    attr.normalized_value(XmlVersion::Implicit1_0)
-                        .map_err(|source| ReadError::xml(self.position(), source))?
-                        .into_owned(),
-                )
-                .filter(|uri| !uri.is_empty())
-            }
-            ResolveResult::Unknown(prefix) => {
-                return Err(self.invalid(
-                    self.position(),
-                    &format!(
-                        "unknown namespace prefix {:?}",
-                        String::from_utf8_lossy(&prefix)
-                    ),
-                ))
-            }
-        };
+        let uri = Option::<Namespace<'_>>::try_from(namespace)
+            .map_err(|source| ReadError::xml(self.position(), source))?
+            .map(|uri| {
+                Attribute::from((b"xmlns".as_slice(), uri.into_inner()))
+                    .normalized_value(XmlVersion::Implicit1_0)
+                    .map(|value| value.into_owned())
+                    .map_err(|source| ReadError::xml(self.position(), source))
+            })
+            .transpose()?
+            .filter(|uri| !uri.is_empty());
         let local = std::str::from_utf8(local.as_ref())
             .map_err(|source| ReadError::xml(self.position(), source))?
             .to_owned();
@@ -387,9 +314,22 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
     // Validate skipped tokens with the same XML library used by the converter;
     // quick-xml alone does not check every XML name, character, or attribute.
     fn validate(&self, event: Event<'_>, position: u64) -> Result<()> {
+        if self.stack.is_empty() {
+            let outside = match &event {
+                Event::Text(text) => text
+                    .as_ref()
+                    .iter()
+                    .all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n')),
+                Event::Decl(_) | Event::Comment(_) | Event::PI(_) => true,
+                _ => false,
+            };
+            if !outside {
+                return Err(self.invalid(position, "content outside the document element"));
+            }
+        }
         let mut writer = Writer::new(Vec::new());
         match event {
-            Event::Empty(_) => writer.write_event(event),
+            Event::Start(start) | Event::Empty(start) => writer.write_event(Event::Empty(start)),
             Event::Decl(_) => writer
                 .write_event(event)
                 .and_then(|_| writer.write_event(Event::Empty(BytesStart::new("check")))),

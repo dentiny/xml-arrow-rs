@@ -1,4 +1,4 @@
-use std::{error::Error, fmt};
+use std::error::Error;
 
 /// A result using this crate's [`ReadError`] type.
 pub type Result<T> = std::result::Result<T, ReadError>;
@@ -15,11 +15,13 @@ pub enum Limit {
 }
 
 /// Configuration, XML input, resource-limit, or record conversion failure.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ReadError {
     /// Invalid options or record path; detected before input is read.
+    #[error("invalid configuration: {0}")]
     Configuration(String),
     /// XML parsing, UTF-8, or input I/O error with the original source.
+    #[error("XML input at byte {byte_offset}: {source}")]
     Xml {
         /// Source byte offset reached by the parser.
         byte_offset: u64,
@@ -28,6 +30,7 @@ pub enum ReadError {
         source: Box<dyn Error + Send + Sync>,
     },
     /// An event, record, or document depth exceeded the configured limit.
+    #[error("{kind:?} limit {limit} exceeded at byte {byte_offset}")]
     LimitExceeded {
         /// Limit that was exceeded.
         kind: Limit,
@@ -37,6 +40,7 @@ pub enum ReadError {
         byte_offset: u64,
     },
     /// A complete record failed Arrow conversion.
+    #[error("record {record_index} at byte {byte_offset}: {source}")]
     Conversion {
         /// One-based index among selected records.
         record_index: u64,
@@ -52,38 +56,6 @@ impl ReadError {
         Self::Xml {
             byte_offset,
             source: Box::new(source),
-        }
-    }
-}
-
-impl fmt::Display for ReadError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Configuration(message) => write!(f, "invalid configuration: {message}"),
-            Self::Xml {
-                byte_offset,
-                source,
-            } => write!(f, "XML input at byte {byte_offset}: {source}"),
-            Self::LimitExceeded {
-                kind,
-                limit,
-                byte_offset,
-            } => write!(f, "{kind:?} limit {limit} exceeded at byte {byte_offset}"),
-            Self::Conversion {
-                record_index,
-                byte_offset,
-                source,
-            } => write!(f, "record {record_index} at byte {byte_offset}: {source}"),
-        }
-    }
-}
-
-impl Error for ReadError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Xml { source, .. } => Some(source.as_ref()),
-            Self::Conversion { source, .. } => Some(source),
-            _ => None,
         }
     }
 }

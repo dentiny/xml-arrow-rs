@@ -110,42 +110,30 @@ See the [schema contract](docs/schema.md) for exact conversion and error behavio
 
 ## Read XML documents asynchronously
 
-`xml_arrow::XmlReader` selects records by an absolute element path and converts
-them into Arrow batches. Input implements
-`futures::io::AsyncBufRead + Unpin + Send`;
-no Tokio runtime is required.
+`xml_arrow::XmlReader` accepts one UTF-8 document through
+`futures::io::AsyncBufRead + Unpin + Send`; no Tokio runtime is required.
+Record paths include the root, e.g. `/catalog/book`. Prefixes use schema URI
+bindings; unprefixed steps select names without a namespace.
 
-```rust
-use arrow_schema::DataType;
-use futures_util::io::Cursor;
-use xml_arrow::{ReaderOptions, XmlField, XmlReader, XmlSchema};
-
-let schema = XmlSchema::new(vec![
-    XmlField::new("id", "@id", DataType::Int64, false),
-])?;
-let mut reader = XmlReader::new(
-    Cursor::new(b"<rows><row id='1'/><row id='2'/></rows>"),
-    schema,
-    "/rows/row",
-    ReaderOptions { batch_size: 1, ..Default::default() },
-)?;
-// Inside an async context:
+```rust,ignore
+let mut reader = XmlReader::new(input, schema, "/catalog/book", ReaderOptions::default())?;
 while let Some(batch) = reader.next_batch().await? {
-    assert_eq!(batch.num_rows(), 1);
+    // Consume each Arrow batch, or use reader.into_stream().
 }
 ```
 
-Use `into_stream()` for a `Send` stream of batches. Record-path prefixes use the
-schema's namespace bindings and match by URI. The reader preserves inherited
-namespaces when extracting records. Cancelling a pending `next_batch()` call
-preserves parsing and pending rows; the first error ends the reader.
+See the [compiled example](crates/xml-arrow/src/lib.rs),
+[reader API](crates/xml-arrow/src/reader/mod.rs), and
+[options and defaults](crates/xml-arrow/src/reader/options.rs).
+Construction performs no I/O. Pending reads may be cancelled and resumed.
+The first error discards the unfinished batch and ends the reader; read to EOF
+to validate the entire document. Empty input is an error; a valid document with
+no matching records returns `None`.
 
-The future `xml-io` crate will handle storage access and return byte readers.
-XML parsing, record selection, and Arrow conversion remain in `xml-arrow`.
-
-Defaults are 1024 rows, 8 MiB per record/event, 64 MiB of serialized input records
-per batch, and depth 128. These byte limits bound input accumulation; Arrow
-allocations depend on the schema. See the [reader contract](docs/reading.md).
+Limits apply to skipped content too. Batch bytes count serialized records with
+inherited namespaces, with at most one lookahead record; caller buffers may
+read ahead. These are input limits, not Arrow allocation or RSS limits.
+Storage access remains a later milestone in `xml-io`.
 
 ## Development
 
