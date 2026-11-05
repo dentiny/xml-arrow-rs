@@ -3,7 +3,9 @@ use std::{
     io::{self, Write},
 };
 
-use crate::{validation::valid_name, XmlSchema};
+use crate::{validation::valid_name, XmlBatchBuilder, XmlSchema};
+use arrow_array::RecordBatch;
+use arrow_schema::SchemaRef;
 use futures_util::io::{AsyncBufRead, AsyncReadExt, Chain, Cursor, Take};
 use quick_xml::{
     events::{attributes::Attribute, BytesEnd, BytesStart, Event},
@@ -21,9 +23,9 @@ struct Name {
     local: String,
 }
 
-pub(super) struct Record {
-    pub(super) xml: String,
-    pub(super) byte_offset: u64,
+struct Record {
+    xml: String,
+    byte_offset: u64,
 }
 
 struct Capture {
@@ -35,9 +37,9 @@ struct Capture {
 // to R. Take limits each event read; Compat adapts futures I/O for quick-xml.
 type Input<R> = Compat<Take<Chain<Cursor<Vec<u8>>, R>>>;
 
-/// Extracts complete record elements at an absolute path from one XML document.
-/// Matching starts a capture; reaching that element's end returns the record.
-pub(super) struct RecordReader<R> {
+/// Owns parsing and batching state for one XML document.
+/// Selected elements are captured as complete records, then appended to builder.
+pub(super) struct ReaderState<R> {
     // Parses events and tracks namespace bindings in the current element scope.
     reader: NsReader<Input<R>>,
     // Reused scratch space for one event; record bytes are stored in capture.
@@ -50,23 +52,27 @@ pub(super) struct RecordReader<R> {
     capture: Option<Capture>,
     // Remains true after the root closes, so a second root can be rejected.
     root_seen: bool,
-    // Whether the initial BOM probe has completed; construction performs no I/O.
-    initialized: bool,
-    // Stripped BOM length (0 or 3), added to parser offsets for source positions.
-    bom_bytes: u64,
-    // Bounds both the captured record and each input event, even when skipped.
-    max_record_bytes: usize,
-    // Bounds element nesting across the entire document, including skipped XML.
-    max_depth: usize,
+    // None until the prefix probe completes, then Some(0 or 3). The stripped
+    // BOM length is added to parser offsets to report original source positions.
+    bom_bytes: Option<u64>,
+    // One configuration for path depth, record/event bytes, and batch limits.
+    options: ReaderOptions,
+    // Owns the projected schema, Arrow columns, and pending row count.
+    builder: XmlBatchBuilder,
+    // One record read ahead when adding it would exceed the batch byte limit.
+    pending: Option<Record>,
+    // One-based index of the last converted record; spans batch boundaries.
+    record_index: u64,
 }
 
-impl<R: AsyncBufRead + Unpin> RecordReader<R> {
+impl<R: AsyncBufRead + Unpin> ReaderState<R> {
     pub(super) fn new(
         input: R,
-        schema: &XmlSchema,
+        schema: XmlSchema,
         path: &str,
-        options: &ReaderOptions,
+        options: ReaderOptions,
     ) -> Result<Self> {
+        options.validate()?;
         let mut names = Vec::new();
         let path = path.strip_prefix('/').ok_or_else(|| {
             ReadError::Configuration("record path must be absolute, e.g. /catalog/book".into())
@@ -104,6 +110,16 @@ impl<R: AsyncBufRead + Unpin> RecordReader<R> {
                 "record path exceeds max_depth".into(),
             ));
         }
+        let builder = match options.projection.as_deref() {
+            Some(indices) => XmlBatchBuilder::new_projected(schema, options.batch_size, indices),
+            None => XmlBatchBuilder::new(schema, options.batch_size),
+        }
+        .map_err(|error| {
+            ReadError::Configuration(match error {
+                crate::Error::Configuration(message) => message,
+                error => error.to_string(),
+            })
+        })?;
         let mut reader =
             NsReader::from_reader(Cursor::new(Vec::new()).chain(input).take(0).compat());
         reader.config_mut().check_comments = true;
@@ -114,15 +130,57 @@ impl<R: AsyncBufRead + Unpin> RecordReader<R> {
             stack: Vec::new(),
             capture: None,
             root_seen: false,
-            initialized: false,
-            bom_bytes: 0,
-            max_record_bytes: options.max_record_bytes,
-            max_depth: options.max_depth,
+            bom_bytes: None,
+            options,
+            builder,
+            pending: None,
+            record_index: 0,
         })
     }
 
-    pub(super) async fn next_record(&mut self) -> Result<Option<Record>> {
-        if !self.initialized {
+    pub(super) fn schema(&self) -> SchemaRef {
+        self.builder.schema()
+    }
+
+    pub(super) async fn next_batch(&mut self) -> Result<Option<RecordBatch>> {
+        let mut bytes = 0usize;
+        let mut last_offset = 0;
+        while !self.builder.is_full() {
+            let record = match self.pending.take() {
+                Some(record) => Some(record),
+                None => self.next_record().await?,
+            };
+            let Some(record) = record else {
+                break;
+            };
+            if !self.builder.is_empty()
+                && bytes.saturating_add(record.xml.len()) > self.options.max_batch_bytes
+            {
+                self.pending = Some(record);
+                break;
+            }
+            self.record_index += 1;
+            last_offset = record.byte_offset;
+            self.builder
+                .append_xml(&record.xml)
+                .map_err(|source| ReadError::Conversion {
+                    record_index: self.record_index,
+                    byte_offset: record.byte_offset,
+                    source,
+                })?;
+            bytes += record.xml.len();
+        }
+        self.builder
+            .flush()
+            .map_err(|source| ReadError::Conversion {
+                record_index: self.record_index,
+                byte_offset: last_offset,
+                source,
+            })
+    }
+
+    async fn next_record(&mut self) -> Result<Option<Record>> {
+        if self.bom_bytes.is_none() {
             // quick-xml's BOM removal requires three bytes in one fill_buf.
             // Read the prefix explicitly so single-byte buffers work too.
             let (prefix, input) = self.reader.get_mut().get_mut().get_mut().get_mut();
@@ -138,27 +196,32 @@ impl<R: AsyncBufRead + Unpin> RecordReader<R> {
                 }
                 len += n;
             }
-            if head == [0xEF, 0xBB, 0xBF] {
-                self.bom_bytes = 3;
+            self.bom_bytes = Some(if head == [0xEF, 0xBB, 0xBF] {
+                3
             } else {
                 *prefix = Cursor::new(head[..len].to_vec());
-            }
-            self.initialized = true;
+                0
+            });
         }
         loop {
             let before = self.position();
             // Take bounds parser allocations even for a huge unselected text,
             // comment, or tag. One extra byte distinguishes a full token from a
             // token which needs to peek at its following delimiter.
-            let allowance = self.max_record_bytes as u64 + 1;
+            let allowance = self.options.max_record_bytes as u64 + 1;
             self.reader.get_mut().get_mut().set_limit(allowance);
             let event = self.reader.read_event_into_async(&mut self.buffer).await;
-            if allowance - self.reader.get_mut().get_mut().limit() > self.max_record_bytes as u64 {
-                return Err(self.limit(Limit::EventBytes, self.max_record_bytes));
+            if allowance - self.reader.get_mut().get_mut().limit()
+                > self.options.max_record_bytes as u64
+            {
+                return Err(self.limit(Limit::EventBytes, self.options.max_record_bytes));
             }
             let event = event
                 .map_err(|source| {
-                    ReadError::xml(self.reader.buffer_position() + self.bom_bytes, source)
+                    ReadError::xml(
+                        self.reader.buffer_position() + self.bom_bytes.unwrap_or_default(),
+                        source,
+                    )
                 })?
                 .into_owned();
             self.buffer.clear();
@@ -178,7 +241,7 @@ impl<R: AsyncBufRead + Unpin> RecordReader<R> {
                             self.capture = Some(Capture {
                                 writer: Writer::new(BoundedBuffer {
                                     bytes: Vec::new(),
-                                    limit: self.max_record_bytes,
+                                    limit: self.options.max_record_bytes,
                                 }),
                                 byte_offset: before,
                             });
@@ -222,7 +285,7 @@ impl<R: AsyncBufRead + Unpin> RecordReader<R> {
                     return Ok(None);
                 }
                 Event::Decl(decl) => {
-                    if before != self.bom_bytes {
+                    if before != self.bom_bytes.unwrap_or_default() {
                         return Err(
                             self.invalid(before, "XML declaration must be at the beginning")
                         );
@@ -254,8 +317,8 @@ impl<R: AsyncBufRead + Unpin> RecordReader<R> {
     }
 
     fn enter(&mut self, name: QName<'_>) -> Result<()> {
-        if self.stack.len() == self.max_depth {
-            return Err(self.limit(Limit::Depth, self.max_depth));
+        if self.stack.len() == self.options.max_depth {
+            return Err(self.limit(Limit::Depth, self.options.max_depth));
         }
         if self.stack.is_empty() {
             if self.root_seen {
@@ -327,7 +390,7 @@ impl<R: AsyncBufRead + Unpin> RecordReader<R> {
             .write_event(event)
             .map_err(|_| ReadError::LimitExceeded {
                 kind: Limit::RecordBytes,
-                limit: self.max_record_bytes,
+                limit: self.options.max_record_bytes,
                 byte_offset: position,
             })
     }
@@ -364,7 +427,7 @@ impl<R: AsyncBufRead + Unpin> RecordReader<R> {
     }
 
     fn position(&self) -> u64 {
-        self.reader.buffer_position() + self.bom_bytes
+        self.reader.buffer_position() + self.bom_bytes.unwrap_or_default()
     }
 
     fn invalid(&self, byte_offset: u64, message: &str) -> ReadError {
