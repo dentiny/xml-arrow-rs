@@ -4,6 +4,7 @@ use arrow_array::{cast::AsArray, types::Int64Type};
 use arrow_schema::DataType;
 use futures_util::io::{AsyncBufRead, AsyncReadExt};
 use opendal::{services::Memory, Operator};
+use tokio::fs;
 use xml_arrow::{ReaderOptions, XmlField, XmlReader, XmlSchema};
 use xml_io::file::XmlFile;
 
@@ -39,7 +40,7 @@ async fn local_paths_and_file_urls_reopen_without_creating_missing_directories()
     let cwd = std::env::current_dir().unwrap();
     let directory = tempfile::tempdir_in(&cwd).unwrap();
     let path = directory.path().join("books #北京.xml");
-    std::fs::write(&path, XML).unwrap();
+    fs::write(&path, XML).await.unwrap();
     for uri in [
         path.to_str().unwrap().to_owned(),
         path.strip_prefix(&cwd)
@@ -63,9 +64,9 @@ async fn local_paths_and_file_urls_reopen_without_creating_missing_directories()
     }
     let parent = directory.path().join("missing");
     let missing = XmlFile::from_uri(parent.join("data.xml").to_str().unwrap()).unwrap();
-    assert!(!parent.exists());
+    assert!(!fs::try_exists(&parent).await.unwrap());
     assert!(bytes(&missing).await.is_err());
-    assert!(!parent.exists());
+    assert!(!fs::try_exists(&parent).await.unwrap());
 }
 
 #[tokio::test]
@@ -73,28 +74,32 @@ async fn parent_segments_resolve_at_open_and_follow_symlinks() {
     let cwd = std::env::current_dir().unwrap();
     let directory = tempfile::tempdir_in(&cwd).unwrap();
     let child = directory.path().join("child");
-    std::fs::create_dir(&child).unwrap();
+    fs::create_dir(&child).await.unwrap();
     let path = child.join("../books.xml");
     let files = [
         XmlFile::from_uri(path.to_str().unwrap()).unwrap(),
         XmlFile::from_uri(path.strip_prefix(&cwd).unwrap().to_str().unwrap()).unwrap(),
     ];
-    std::fs::write(directory.path().join("books.xml"), XML).unwrap();
+    fs::write(directory.path().join("books.xml"), XML)
+        .await
+        .unwrap();
     for file in files {
         assert_eq!(ids(file.open().await.unwrap()).await, [1, 2]);
     }
     let missing = directory.path().join("missing");
     let file = XmlFile::from_uri(missing.join("../absent.xml").to_str().unwrap()).unwrap();
     assert!(bytes(&file).await.is_err());
-    assert!(!missing.exists());
+    assert!(!fs::try_exists(&missing).await.unwrap());
 
     #[cfg(unix)]
     {
         let target = directory.path().join("target");
-        std::fs::create_dir_all(target.join("child")).unwrap();
-        std::fs::write(target.join("books.xml"), "<root><row id='3'/></root>").unwrap();
+        fs::create_dir_all(target.join("child")).await.unwrap();
+        fs::write(target.join("books.xml"), "<root><row id='3'/></root>")
+            .await
+            .unwrap();
         let link = directory.path().join("link");
-        std::os::unix::fs::symlink(target.join("child"), &link).unwrap();
+        fs::symlink(target.join("child"), &link).await.unwrap();
         let file = XmlFile::from_uri(link.join("../books.xml").to_str().unwrap()).unwrap();
         assert_eq!(ids(file.open().await.unwrap()).await, [3]);
     }
