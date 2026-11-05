@@ -168,34 +168,44 @@ fn inherited_namespace_cannot_inject_record_attributes() {
 
 #[test]
 fn cancelled_next_batch_resumes_without_losing_partial_events_or_rows() {
-    let xml = String::from("<root><row id='1'/><row id='2' note='北😀'/></root>");
-    let input = Input::new(xml.as_bytes(), 1, true);
-    let mut reader =
-        XmlReader::new(input, schema(), "/root/row", ReaderOptions::default()).unwrap();
-    let mut cancelled = 0;
-    let mut rows = Vec::new();
-    let mut eof = false;
-    for _ in 0..10000 {
-        match reader.next_batch().now_or_never() {
-            None => cancelled += 1,
-            Some(Ok(Some(batch))) => rows.extend(
-                batch
-                    .column(0)
-                    .as_primitive::<Int64Type>()
-                    .values()
-                    .iter()
-                    .copied(),
-            ),
-            Some(Ok(None)) => {
-                eof = true;
-                break;
+    for (batch_size, bom) in [(1, "\u{FEFF}"), (1024, "")] {
+        let xml = format!("{bom}<root><row id='1'/><row id='2' note='北😀'/></root>");
+        let input = Input::new(xml.as_bytes(), 1, true);
+        let mut reader = XmlReader::new(
+            input,
+            schema(),
+            "/root/row",
+            ReaderOptions {
+                batch_size,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut cancelled = 0;
+        let mut rows = Vec::new();
+        let mut eof = false;
+        for _ in 0..10000 {
+            match reader.next_batch().now_or_never() {
+                None => cancelled += 1,
+                Some(Ok(Some(batch))) => rows.extend(
+                    batch
+                        .column(0)
+                        .as_primitive::<Int64Type>()
+                        .values()
+                        .iter()
+                        .copied(),
+                ),
+                Some(Ok(None)) => {
+                    eof = true;
+                    break;
+                }
+                Some(Err(error)) => panic!("{error}"),
             }
-            Some(Err(error)) => panic!("{error}"),
         }
+        assert!(cancelled > 20);
+        assert!(eof);
+        assert_eq!(rows, vec![1, 2]);
     }
-    assert!(cancelled > 20);
-    assert!(eof);
-    assert_eq!(rows, vec![1, 2]);
 }
 
 #[test]
