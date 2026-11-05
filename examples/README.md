@@ -19,4 +19,4 @@ Use `next_batch()` to process and release batches incrementally. The small
 a large document retains all output batches.
 
 The [README](../README.md) explains field mappings, nested values, namespaces,
-inference, input limits, and error behavior.
+inference, and input limits.

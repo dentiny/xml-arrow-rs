@@ -233,7 +233,7 @@ another record, then flush once at EOF for remaining rows. An empty flush return
 `None`. A failed append leaves earlier rows intact and the builder reusable.
 This builder limits rows; use `XmlReader` for document-level byte/depth limits.
 
-## Limits and errors
+## Limits
 
 `ReaderOptions` defaults:
 
@@ -253,11 +253,6 @@ be retained. `Utf8` and `List` use Arrow's 32-bit offsets.
 Inputs must be UTF-8; XML encoding declarations do not transcode input. XML
 references, CDATA, and Unicode are supported. DTDs and custom entities are rejected.
 Unmapped content is ignored after parsing and input validation.
-
-Read to EOF to validate the whole document. Empty input is an error; a valid
-document with no matching records yields no batches. A reader error discards
-the unfinished batch and ends the stream. Cancelled `next_batch()` calls can
-resume without losing partial records.
 
 ## Run the examples
 
