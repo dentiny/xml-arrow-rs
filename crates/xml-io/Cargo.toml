@@ -1,0 +1,26 @@
+[package]
+name = "xml-io"
+description = "Reopenable storage inputs for XML readers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+readme = "../../README.md"
+
+[features]
+default = []
+gzip = ["dep:async-compression"]
+
+[dependencies]
+opendal.workspace = true
+futures-util.workspace = true
+url = "2"
+async-compression = { version = "0.4.50", default-features = false, features = ["futures-io", "gzip"], optional = true }
+
+[dev-dependencies]
+xml-arrow = { path = "../xml-arrow", version = "0.1.0" }
+arrow-array.workspace = true
+arrow-schema.workspace = true
+opendal = { workspace = true, features = ["services-memory"] }
+tokio = { version = "1", features = ["macros", "rt"] }
+tempfile = "3"
+flate2 = "1"

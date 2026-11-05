@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/xml-arrow"]
+members = ["crates/xml-arrow", "crates/xml-io"]
 resolver = "2"
 
 [workspace.package]
@@ -15,3 +15,4 @@ futures-util = { version = "0.3", default-features = false, features = ["std", "
 quick-xml = { version = "0.41", default-features = false, features = ["async-tokio"] }
 tokio-util = { version = "0.7", default-features = false, features = ["compat"] }
 thiserror = "2"
+opendal = { version = "0.59.3", default-features = false, features = ["services-fs"] }

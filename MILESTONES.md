@@ -1,7 +1,7 @@
 # XML to Arrow milestones
 
 Implement one reviewable PR at a time, in dependency order. This checkout
-implements milestones 1–3. Fixture-only PRs can land between functional
+implements milestones 1–4. Fixture-only PRs can land between functional
 milestones, so milestone numbers are independent of GitHub PR numbers.
 No CI or CLI is planned.
 
@@ -15,7 +15,6 @@ No CI or CLI is planned.
 | 6 | Benchmarks and complete usage documentation | Flat/wide/nested/large inputs have throughput and memory baselines; examples cover implemented public APIs. |
 
 Each PR includes its own tests and documentation. Run formatting, clippy, and
-workspace tests locally. XML parsing, record selection, asynchronous reading, and Arrow conversion stay
-in `xml-arrow`. `xml-io` is reserved for storage access, starting in milestone 4.
-Raw XML retention,
-if introduced, is opt-in.
+workspace tests locally. XML parsing, record selection, asynchronous reading, and
+Arrow conversion stay in `xml-arrow`; `xml-io` handles storage access and optional
+gzip decoding. Raw XML retention, if introduced, is opt-in.
