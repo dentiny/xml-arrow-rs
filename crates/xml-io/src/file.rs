@@ -1,17 +1,16 @@
-use std::{borrow::Cow, io, path::Path};
+//! Reopenable file and object inputs.
+
+use std::{borrow::Cow, io};
 
 use opendal::{services::Fs, FuturesAsyncReader, Operator};
-use url::Url;
 
-fn invalid(message: impl ToString) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, message.to_string())
-}
+use crate::validation::{local_path_parts, validate_local_path, validate_object_path};
 
 /// A reusable description of one input object. Constructors do not open it.
 ///
 /// ```
 /// # fn main() -> std::io::Result<()> {
-/// let file = xml_io::XmlFile::from_uri("records.xml")?;
+/// let file = xml_io::file::XmlFile::from_uri("records.xml")?;
 /// // No file is opened until file.open().await is called.
 /// assert!(file.source_uri().ends_with("records.xml"));
 /// # Ok(())
@@ -30,9 +29,7 @@ impl XmlFile {
     /// credentials, transport, and layers. No global defaults are installed.
     pub fn new(operator: Operator, path: impl Into<String>) -> io::Result<Self> {
         let path = path.into();
-        if path.is_empty() || path.ends_with('/') {
-            return Err(invalid("input must name an object"));
-        }
+        validate_object_path(&path)?;
         Ok(Self {
             operator: Some(operator),
             path,
@@ -43,35 +40,9 @@ impl XmlFile {
     /// Relative paths are resolved against the current directory now, so later
     /// opens use the same location. Other storage schemes require [`Self::new`].
     pub fn from_uri(uri: &str) -> io::Result<Self> {
-        if uri.is_empty() {
-            return Err(invalid("input URI must not be empty"));
-        }
-        let path = if Path::new(uri).is_absolute() {
-            uri.into()
-        } else {
-            match Url::parse(uri) {
-                Ok(url) if url.scheme() == "file" => url
-                    .to_file_path()
-                    .map_err(|_| invalid("invalid file URL"))?,
-                _ if uri.contains("://") => {
-                    return Err(invalid(
-                        "use XmlFile::new with a configured operator for this storage service",
-                    ))
-                }
-                _ => uri.into(),
-            }
-        };
-        let path = std::path::absolute(path)?;
-        if path.file_name().is_none() {
-            return Err(invalid("input must name a file"));
-        }
-        let path = path
-            .into_os_string()
-            .into_string()
-            .map_err(|_| invalid("local path must be UTF-8"))?;
         Ok(Self {
             operator: None,
-            path,
+            path: validate_local_path(uri)?,
         })
     }
 
@@ -88,27 +59,9 @@ impl XmlFile {
         let (operator, path) = match &self.operator {
             Some(operator) => (operator.clone(), Cow::Borrowed(self.path.as_str())),
             None => {
-                let absolute = Path::new(&self.path);
-                // Use the filesystem root, so OpenDAL cannot create a missing
-                // input parent directory while building its filesystem backend.
-                let root = absolute
-                    .ancestors()
-                    .last()
-                    .ok_or_else(|| invalid("missing filesystem root"))?;
-                let path = absolute.strip_prefix(root).map_err(invalid)?;
-                let path = path
-                    .to_str()
-                    .ok_or_else(|| invalid("local path must be UTF-8"))?;
-                let operator = Operator::new(
-                    Fs::default().root(
-                        root.to_str()
-                            .ok_or_else(|| invalid("local root must be UTF-8"))?,
-                    ),
-                )?;
-                #[cfg(windows)]
-                let path = Cow::Owned(path.replace('\\', "/"));
-                #[cfg(not(windows))]
-                let path = Cow::Borrowed(path);
+                let (root, path) = local_path_parts(&self.path)?;
+                // The filesystem root avoids creating a missing input parent.
+                let operator = Operator::new(Fs::default().root(root))?;
                 (operator, path)
             }
         };
@@ -117,18 +70,5 @@ impl XmlFile {
             .await?
             .into_futures_async_read(..)
             .await?)
-    }
-
-    /// Opens and incrementally decompresses GZIP bytes, including concatenated
-    /// members. Requires the `gzip` feature. Compression is selected explicitly;
-    /// [`Self::open`] always returns the original bytes regardless of filename.
-    /// Downstream XML reader offsets count decompressed bytes.
-    #[cfg(feature = "gzip")]
-    pub async fn open_gzip(
-        &self,
-    ) -> io::Result<impl futures_util::io::AsyncBufRead + Unpin + Send> {
-        let mut decoder = async_compression::futures::bufread::GzipDecoder::new(self.open().await?);
-        decoder.multiple_members(true);
-        Ok(futures_util::io::BufReader::new(decoder))
     }
 }

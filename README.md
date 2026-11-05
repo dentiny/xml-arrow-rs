@@ -143,7 +143,7 @@ Each `open()` starts an independent stream; object access errors can occur on
 open or during reading. Local filesystem reads require a Tokio runtime.
 
 ```rust,ignore
-use xml_io::XmlFile;
+use xml_io::file::XmlFile;
 
 let file = XmlFile::from_uri("books.xml")?;
 let reader = XmlReader::new(file.open().await?, schema, "/catalog/book", ReaderOptions::default())?;
@@ -154,18 +154,12 @@ For remote storage, pass a configured OpenDAL operator to
 layers are preserved. `source_uri()` provides the absolute local path or supplied
 object key as a source label; it does not add columns to Arrow batches.
 
-Enable `xml-io`'s optional `gzip` feature and use `open_gzip()` for incremental
-decompression. Concatenated members form one byte stream, which must still be
-one XML document. `open()` always returns original bytes, including for `.gz`
-filenames. Truncated gzip streams report an error while reading.
-
 ## Development
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
-cargo test -p xml-io --no-default-features
 ```
 
 Dependencies use Arrow 58, matching the local `atif-arrow` reference project.

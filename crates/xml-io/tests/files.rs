@@ -3,11 +3,9 @@ use std::io;
 use arrow_array::{cast::AsArray, types::Int64Type};
 use arrow_schema::DataType;
 use futures_util::io::{AsyncBufRead, AsyncReadExt};
+use opendal::{services::Memory, Operator};
 use xml_arrow::{ReaderOptions, XmlField, XmlReader, XmlSchema};
-use xml_io::{
-    opendal::{services::Memory, Operator},
-    XmlFile,
-};
+use xml_io::file::XmlFile;
 
 const XML: &str = "<root><row id='1'/><row id='2'/></root>";
 
@@ -99,47 +97,5 @@ async fn configured_operator_preserves_its_root_and_returns_independent_streams(
             XmlFile::from_uri(uri).unwrap_err().kind(),
             io::ErrorKind::InvalidInput
         );
-    }
-}
-
-#[cfg(feature = "gzip")]
-#[tokio::test]
-async fn gzip_handles_single_and_concatenated_members_and_rejects_truncation() {
-    fn member(bytes: &[u8]) -> Vec<u8> {
-        use std::io::Write;
-        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        encoder.write_all(bytes).unwrap();
-        encoder.finish().unwrap()
-    }
-    let operator = Operator::new(Memory::default()).unwrap();
-    let single = member(XML.as_bytes());
-    let split = XML.len() / 2;
-    let multiple = [
-        member(&XML.as_bytes()[..split]),
-        member(b""),
-        member(&XML.as_bytes()[split..]),
-    ]
-    .concat();
-    for (path, compressed) in [
-        ("single.xml.gz", single.clone()),
-        ("members.bin", multiple.clone()),
-    ] {
-        operator.write(path, compressed.clone()).await.unwrap();
-        let file = XmlFile::new(operator.clone(), path).unwrap();
-        assert_eq!(bytes(&file).await.unwrap(), compressed);
-        assert_eq!(ids(file.open_gzip().await.unwrap()).await, [1, 2]);
-        // The returned reader owns its input and can outlive the file handle.
-        let input = file.open_gzip().await.unwrap();
-        drop(file);
-        assert_eq!(ids(input).await, [1, 2]);
-    }
-    for compressed in [&single, &multiple] {
-        operator
-            .write("truncated.gz", compressed[..compressed.len() - 1].to_vec())
-            .await
-            .unwrap();
-        let file = XmlFile::new(operator.clone(), "truncated.gz").unwrap();
-        let mut input = file.open_gzip().await.unwrap();
-        assert!(input.read_to_end(&mut Vec::new()).await.is_err());
     }
 }
