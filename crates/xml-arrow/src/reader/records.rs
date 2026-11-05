@@ -31,18 +31,32 @@ struct Capture {
     byte_offset: u64,
 }
 
+// Cursor replays the initial bytes when they are not a BOM; Chain prepends them
+// to R. Take limits each event read; Compat adapts futures I/O for quick-xml.
 type Input<R> = Compat<Take<Chain<Cursor<Vec<u8>>, R>>>;
 
+/// Extracts complete record elements at an absolute path from one XML document.
+/// Matching starts a capture; reaching that element's end returns the record.
 pub(super) struct RecordReader<R> {
+    // Parses events and tracks namespace bindings in the current element scope.
     reader: NsReader<Input<R>>,
+    // Reused scratch space for one event; record bytes are stored in capture.
     buffer: Vec<u8>,
+    // Requested absolute path, resolved to namespace URI/local-name pairs.
     path: Vec<Name>,
+    // Current element ancestry, including skipped elements; compared with path.
     stack: Vec<Name>,
+    // Serialized XML and source offset of the selected record being collected.
     capture: Option<Capture>,
+    // Remains true after the root closes, so a second root can be rejected.
     root_seen: bool,
+    // Whether the initial BOM probe has completed; construction performs no I/O.
     initialized: bool,
+    // Stripped BOM length (0 or 3), added to parser offsets for source positions.
     bom_bytes: u64,
+    // Bounds both the captured record and each input event, even when skipped.
     max_record_bytes: usize,
+    // Bounds element nesting across the entire document, including skipped XML.
     max_depth: usize,
 }
 
