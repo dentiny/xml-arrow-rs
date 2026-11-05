@@ -1,9 +1,7 @@
 #![deny(missing_docs)]
-//! Convert individual XML records to Apache Arrow with an explicit schema.
+//! Convert XML records to Arrow batches with an explicit schema.
 //!
-//! Each call to [`XmlBatchBuilder::append_xml`] supplies one complete XML
-//! element. Paths are relative to that element. [`XmlReader`] selects records
-//! from an asynchronous byte reader; storage access belongs in `xml-io`.
+//! Use [`XmlBatchBuilder`] for record elements and [`XmlReader`] for documents.
 //!
 //! ```
 //! # fn main() -> xml_arrow::Result<()> {
@@ -23,7 +21,7 @@
 //! # }
 //! ```
 //!
-//! Nested child paths are relative to their selected parent element:
+//! Nested fields:
 //!
 //! ```
 //! # fn main() -> xml_arrow::Result<()> {
@@ -42,7 +40,7 @@
 //! # }
 //! ```
 
-//! Asynchronous document reading:
+//! Read a document:
 //!
 //! ```
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {

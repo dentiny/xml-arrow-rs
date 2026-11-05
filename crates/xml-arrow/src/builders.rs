@@ -65,8 +65,7 @@ pub(crate) fn append(builder: &mut dyn ArrayBuilder, field: &XmlField, value: Va
     }
 }
 
-// All items in a row share each nested Arrow builder. Check their cumulative
-// offsets together before append, including for lists of lists or structs.
+// Nested items share builders, so check their combined offsets before append.
 pub(crate) fn validate_capacity(
     builder: &dyn ArrayBuilder,
     field: &XmlField,

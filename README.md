@@ -4,8 +4,8 @@ A Rust library for converting XML records into Apache Arrow `RecordBatch` values
 Column names, XML paths, types, and nullability are explicit. Storage access is
 separate from XML parsing and conversion.
 
-This checkout implements **milestones 1–3: explicit scalar/nested conversion and
-asynchronous document reading**. See [MILESTONES.md](MILESTONES.md) for the roadmap.
+This checkout implements **milestones 1–4: explicit conversion, asynchronous
+document reading, and storage inputs**. See [MILESTONES.md](MILESTONES.md) for the roadmap.
 
 ## Convert records
 
@@ -97,7 +97,7 @@ scalars, structs, or other lists.
 - Inputs are decoded Rust strings; declaration metadata does not change decoding.
 - Namespace URI matching and nullable elements via `xsi:nil`.
 - DTDs and custom entities are not supported.
-- No automatic schema inference, storage integration, CLI, CI, or built-in
+- No automatic schema inference, CLI, CI, or built-in
   IPC/Parquet export at this stage.
 
 `XmlBatchBuilder` limits **rows, not bytes**. Callers supply complete records in memory;
@@ -133,14 +133,33 @@ no matching records returns `None`.
 Limits apply to skipped content too. Batch bytes count serialized records with
 inherited namespaces, with at most one lookahead record; caller buffers may
 read ahead. These are input limits, not Arrow allocation or RSS limits.
-Storage access remains a later milestone in `xml-io`.
+
+## Open storage inputs
+
+`xml-io` handles storage access and returns byte readers; it has no production
+dependency on `xml-arrow`. `XmlFile::from_uri` accepts local paths and file URLs.
+Relative paths are made absolute at construction, without opening the input.
+Each `open()` starts an independent stream; object access errors can occur on
+open or during reading. Local filesystem reads require a Tokio runtime.
+
+```rust,ignore
+use xml_io::file::XmlFile;
+
+let file = XmlFile::from_uri("books.xml")?;
+let reader = XmlReader::new(file.open().await?, schema, "/catalog/book", ReaderOptions::default())?;
+```
+
+For remote storage, pass a configured OpenDAL operator to
+`XmlFile::new(operator, "object/key.xml")`. Its root, credentials, transport, and
+layers are preserved. `source_uri()` provides the absolute local path or supplied
+object key as a source label; it does not add columns to Arrow batches.
 
 ## Development
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
 ```
 
 Dependencies use Arrow 58, matching the local `atif-arrow` reference project.

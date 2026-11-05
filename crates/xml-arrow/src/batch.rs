@@ -10,11 +10,7 @@ use crate::{
     Error, Result, XmlSchema,
 };
 
-/// Accumulates complete XML records into Arrow batches without performing I/O.
-///
-/// An append is atomic: all selected values are parsed and converted before any
-/// column is changed. Flush a full batch before appending the next record.
-/// The row limit does not bound record size or total bytes in memory.
+/// Builds Arrow batches from complete XML record elements.
 pub struct XmlBatchBuilder {
     schema: XmlSchema,
     columns: Vec<Box<dyn ArrayBuilder>>,
@@ -23,7 +19,7 @@ pub struct XmlBatchBuilder {
 }
 
 impl XmlBatchBuilder {
-    /// Creates a builder for all columns. `batch_size` must be positive.
+    /// Creates a builder with a positive row limit.
     pub fn new(schema: XmlSchema, batch_size: usize) -> Result<Self> {
         if batch_size == 0 {
             return Err(Error::Configuration("batch_size must be positive".into()));
@@ -41,11 +37,9 @@ impl XmlBatchBuilder {
         })
     }
 
-    /// Selects column indices in output order. Duplicates and out-of-range indices fail.
-    ///
-    /// An empty projection preserves row counts. Only selected fields are converted
-    /// or checked for missing/repeated values; XML syntax and supported input rules
-    /// are checked regardless of projection.
+    /// Selects columns in order; duplicate or invalid indices fail.
+    /// Only selected fields are converted; an empty projection counts rows.
+    /// XML syntax is always checked.
     pub fn new_projected(
         schema: XmlSchema,
         batch_size: usize,
@@ -54,16 +48,12 @@ impl XmlBatchBuilder {
         Self::new(schema.project(projection)?, batch_size)
     }
 
-    /// Appends one complete XML record element, including optional surrounding
-    /// whitespace, comments, processing instructions, and a leading XML declaration.
-    ///
-    /// Failure leaves previously appended rows intact and this builder reusable.
+    /// Appends a complete XML record. Errors leave pending rows unchanged.
     pub fn append_xml(&mut self, input: &str) -> Result<()> {
         if self.is_full() {
             return Err(Error::BatchFull);
         }
         let row = parse(input, &self.schema)?;
-        // Check all nested offsets before mutating any column.
         for ((column, value), field) in self.columns.iter().zip(&row).zip(&self.schema.fields) {
             validate_capacity(column.as_ref(), field, &[value])?;
         }
@@ -74,27 +64,27 @@ impl XmlBatchBuilder {
         Ok(())
     }
 
-    /// Number of pending rows.
+    /// Pending row count.
     pub fn len(&self) -> usize {
         self.rows
     }
 
-    /// Whether there are no pending rows.
+    /// Whether the batch is empty.
     pub fn is_empty(&self) -> bool {
         self.rows == 0
     }
 
-    /// Whether the configured row capacity has been reached.
+    /// Whether the row limit has been reached.
     pub fn is_full(&self) -> bool {
         self.rows == self.batch_size
     }
 
-    /// Output schema, including projection order.
+    /// Projected output schema.
     pub fn schema(&self) -> SchemaRef {
         self.schema.arrow_schema()
     }
 
-    /// Returns pending rows and resets the builder. Returns `None` when empty.
+    /// Flushes pending rows; returns `None` if empty.
     pub fn flush(&mut self) -> Result<Option<RecordBatch>> {
         if self.is_empty() {
             return Ok(None);

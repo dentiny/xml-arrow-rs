@@ -5,7 +5,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 readme = "../../README.md"
-# This integration test embeds fixtures from the workspace root checkout.
+# Uses workspace-root fixtures.
 exclude = ["tests/real_xml.rs"]
 
 [dependencies]
@@ -18,7 +18,7 @@ quick-xml.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]
-futures-executor = "0.3"
+futures-executor.workspace = true
 
 [[example]]
 name = "convert"

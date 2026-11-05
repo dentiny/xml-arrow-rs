@@ -3,25 +3,21 @@ const DEFAULT_MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
 const DEFAULT_MAX_BATCH_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_MAX_DEPTH: usize = 128;
 
-/// Batch sizing, projection, and input resource limits.
+/// Batch size, projection, and XML limits.
 #[derive(Clone, Debug)]
 pub struct ReaderOptions {
     /// Maximum rows returned per batch. Default: 1024.
     pub batch_size: usize,
-    /// Maximum serialized bytes per record, including inherited namespaces.
-    /// Also limits bytes consumed for each XML event. Default: 8 MiB.
-    /// Record size is checked after each serialized event, so temporary buffers
-    /// may exceed this limit.
+    /// Maximum record bytes, including inherited namespaces. Default: 8 MiB.
+    /// Also caps input events. Records are checked after writing each event;
+    /// temporary buffers may exceed this limit.
     pub max_record_bytes: usize,
-    /// Maximum sum of serialized input-record bytes represented by one batch.
-    /// Arrow allocations depend on the schema; this is not an RSS limit.
-    /// Must be at least `max_record_bytes`. Default: 64 MiB.
+    /// Maximum sum of serialized record bytes per batch. Default: 64 MiB.
+    /// Must be at least `max_record_bytes`; excludes Arrow allocations.
     pub max_batch_bytes: usize,
-    /// Maximum element depth across the whole document. Default: 128.
-    /// Values must be in `1..65535`.
+    /// Maximum element depth (`1..65535`). Default: 128.
     pub max_depth: usize,
-    /// Root-column indices in output order. `None` selects all; `Some(vec![])`
-    /// counts records without output columns.
+    /// Output columns in order; `None` selects all, `Some(vec![])` only counts rows.
     pub projection: Option<Vec<usize>>,
 }
 

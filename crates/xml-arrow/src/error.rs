@@ -1,29 +1,29 @@
 use std::fmt;
 
-/// A result using this crate's [`Error`] type.
+/// Result with [`Error`].
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Configuration, XML parsing, scalar conversion, or batch construction failure.
+/// XML-to-Arrow conversion error.
 #[derive(Debug)]
 pub enum Error {
-    /// An unsupported schema, invalid path, projection, or batch size.
+    /// Invalid schema, path, or options.
     Configuration(String),
-    /// XML syntax error, including the parser's source location.
+    /// XML parsing error.
     Xml(roxmltree::Error),
-    /// Valid XML uses a feature not supported by the converter.
+    /// Unsupported XML feature.
     UnsupportedXml(&'static str),
-    /// A mapped field is missing, repeated, structurally invalid, or ill-typed.
+    /// Invalid or missing field value.
     Field {
-        /// Output column name.
+        /// Column name.
         name: String,
         /// Relative XML path.
         path: String,
-        /// Explanation of the failure.
+        /// Failure reason.
         message: String,
     },
-    /// The configured batch is full; flush before appending another record.
+    /// Flush before appending more rows.
     BatchFull,
-    /// Arrow rejected the constructed batch.
+    /// Arrow error.
     Arrow(arrow_schema::ArrowError),
 }
 

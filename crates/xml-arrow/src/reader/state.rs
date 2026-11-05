@@ -22,30 +22,23 @@ struct Capture {
     byte_offset: u64,
 }
 
-// Cursor exposes the whole three-byte prefix so quick-xml can handle a split BOM.
-// Take bounds each event; Compat adapts futures I/O for quick-xml.
 type Input<R> = Compat<Take<Chain<Cursor<Vec<u8>>, R>>>;
 
-/// Owns parsing and batching state for one XML document.
-/// Selected elements are captured as complete records, then appended to builder.
 pub(super) struct ReaderState<R> {
-    // Parses events and tracks namespace bindings in the current element scope.
     reader: NsReader<Input<R>>,
-    // Requested absolute path, resolved to namespace URI/local-name pairs.
+    // Record path resolved to namespace URIs.
     path: Vec<Name>,
-    // Current element ancestry, including skipped elements; compared with path.
+    // Current element path, including skipped content.
     stack: Vec<Name>,
-    // Remains true after the root closes, so a second root can be rejected.
+    // Detect empty documents and repeated roots.
     root_seen: bool,
-    // Stripped BOM length (0 or 3), added to parser offsets for source positions.
+    // Add stripped BOM bytes back to error offsets.
     bom_bytes: u64,
-    // One configuration for path depth, record/event bytes, and batch limits.
     options: ReaderOptions,
-    // Owns the projected schema, Arrow columns, and pending row count.
     builder: XmlBatchBuilder,
-    // One record read ahead when adding it would exceed the batch byte limit.
+    // Record deferred by the batch byte limit.
     pending: Option<Record>,
-    // One-based index of the last converted record; spans batch boundaries.
+    // Counts records across batches.
     record_index: u64,
 }
 
@@ -88,8 +81,6 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
     }
 
     pub(super) async fn next_batch(&mut self) -> Result<Option<RecordBatch>> {
-        // This scratch buffer is reused within the batch and retained by the
-        // in-flight future if next_batch is cancelled.
         let mut buffer = Vec::new();
         let mut bytes = 0usize;
         let mut last_offset = 0;
@@ -142,14 +133,10 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                 0
             };
         }
-        // Capture is only needed until this call returns a complete record.
         let mut capture: Option<Capture> = None;
         loop {
             let before = self.position();
-            // Take bounds parser allocations even for a huge unselected text,
-            // comment, or tag. One extra byte distinguishes a full token from a
-            // token which needs to peek at its following delimiter.
-            // quick-xml consumes the BOM separately from its first XML event.
+            // Exclude the BOM; allow one byte for delimiter lookahead.
             let bom = if self.reader.buffer_position() == 0 {
                 self.bom_bytes
             } else {
@@ -279,8 +266,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                 PrefixDeclaration::Named(prefix) => [b"xmlns:".as_slice(), prefix].concat(),
             };
             if !keys.contains(&key) {
-                // Bindings already contain XML escapes. Protect the output
-                // quote without double-escaping references such as &amp;.
+                // Escape quotes without changing existing XML references.
                 let value = std::str::from_utf8(uri.into_inner())
                     .map_err(|source| ReadError::xml(self.position(), source))?
                     .replace('"', "&quot;");
@@ -290,8 +276,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
         Ok(start)
     }
 
-    // Validate skipped tokens with the same XML library used by the converter;
-    // quick-xml alone does not check every XML name, character, or attribute.
+    // quick-xml does not fully validate skipped content.
     fn validate(&self, event: Event<'_>, position: u64) -> Result<()> {
         if self.stack.is_empty() {
             let outside = match &event {
@@ -337,7 +322,6 @@ impl Capture {
         self.writer
             .write_event(event)
             .map_err(|source| ReadError::xml(byte_offset, source))?;
-        // Check after each event; input events are bounded separately.
         if self.writer.get_ref().len() > limit {
             return Err(ReadError::limit(Limit::RecordBytes, limit, byte_offset));
         }
