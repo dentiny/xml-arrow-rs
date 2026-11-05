@@ -254,24 +254,4 @@ Inputs must be UTF-8; XML encoding declarations do not transcode input. XML
 references, CDATA, and Unicode are supported. DTDs and custom entities are rejected.
 Unmapped content is ignored after parsing and input validation.
 
-## Run the examples
-
-From the repository root:
-
-| Command | Demonstrates |
-| --- | --- |
-| `cargo run -p xml-arrow --example convert` | Explicit mappings and record conversion. |
-| `cargo run -p xml-arrow --example stream` | Batches, namespaces, and projection. |
-| `cargo run -p xml-arrow --example infer` | Inference and consuming a batch stream. |
-| `cargo run -p xml-io --example storage` | Local paths and configured operators using real XML. |
-
-See the [example guide](examples/README.md) and the checked-in
-[XML fixtures](testdata/README.md). To check a local change:
-
-```sh
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-```
-
 Licensed under [MIT](LICENSE).
