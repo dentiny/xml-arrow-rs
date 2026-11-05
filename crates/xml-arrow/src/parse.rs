@@ -51,22 +51,8 @@ fn read(
         Source::Element(node) => node,
         Source::Attribute(value) => return convert(field, value),
     };
-    if let Some(nil) = node.attribute(("http://www.w3.org/2001/XMLSchema-instance", "nil")) {
-        match nil.trim_matches([' ', '\t', '\r', '\n']) {
-            "true" | "1" => {
-                if node
-                    .children()
-                    .any(|child| child.is_element() || has_text(child))
-                {
-                    return Err(
-                        field.error("xsi:nil element must not contain text or child elements")
-                    );
-                }
-                return null_value(field);
-            }
-            "false" | "0" => {}
-            _ => return Err(field.error("xsi:nil must be true, false, 1, or 0")),
-        }
+    if is_nil(node).map_err(|message| field.error(message))? {
+        return null_value(field);
     }
     let value = match field.field.data_type() {
         DataType::Struct(_) => {
@@ -102,6 +88,25 @@ fn read(
         }
     };
     Ok(value)
+}
+
+pub(crate) fn is_nil(node: Node<'_, '_>) -> std::result::Result<bool, &'static str> {
+    match node
+        .attribute(("http://www.w3.org/2001/XMLSchema-instance", "nil"))
+        .map(|value| value.trim_matches([' ', '\t', '\r', '\n']))
+    {
+        Some("true" | "1") => {
+            if node
+                .children()
+                .any(|child| child.is_element() || has_text(child))
+            {
+                return Err("xsi:nil element must not contain text or child elements");
+            }
+            Ok(true)
+        }
+        None | Some("false" | "0") => Ok(false),
+        _ => Err("xsi:nil must be true, false, 1, or 0"),
+    }
 }
 
 fn select<'a, 'input>(

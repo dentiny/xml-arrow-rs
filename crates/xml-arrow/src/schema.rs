@@ -88,6 +88,15 @@ impl XmlField {
     }
 }
 
+/// A schema prefix bound to a namespace URI.
+#[derive(Clone, Copy, Debug)]
+pub struct NamespaceBinding<'a> {
+    /// Prefix used in schema and record paths.
+    pub prefix: &'a str,
+    /// XML namespace URI matched independently of input prefixes.
+    pub uri: &'a str,
+}
+
 /// Validated column mappings and namespace bindings.
 #[derive(Clone, Debug)]
 pub struct XmlSchema {
@@ -104,7 +113,10 @@ impl XmlSchema {
 
     /// Binds path prefixes to namespace URIs; input prefixes may differ.
     /// `xml` is predefined; `xml` and `xmlns` cannot be rebound.
-    pub fn with_namespaces(fields: Vec<XmlField>, bindings: &[(&str, &str)]) -> Result<Self> {
+    pub fn with_namespaces(
+        fields: Vec<XmlField>,
+        bindings: &[NamespaceBinding<'_>],
+    ) -> Result<Self> {
         let namespaces = validate_namespaces(bindings)?;
         validate_fields(&fields, &namespaces)?;
         let arrow = Arc::new(Schema::new(

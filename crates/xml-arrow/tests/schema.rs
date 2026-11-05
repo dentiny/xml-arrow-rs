@@ -1,5 +1,5 @@
 use arrow_schema::DataType::{Binary, Int64, Utf8};
-use xml_arrow::{XmlBatchBuilder, XmlField, XmlSchema};
+use xml_arrow::{NamespaceBinding, XmlBatchBuilder, XmlField, XmlSchema};
 
 #[test]
 fn rejects_invalid_schema() {
@@ -56,9 +56,24 @@ fn rejects_invalid_nested_mappings_and_namespace_bindings() {
         assert!(XmlSchema::new(vec![field]).is_err());
     }
     for bindings in [
-        vec![("p", "urn:a"), ("p", "urn:b")],
-        vec![("xml", "urn:wrong")],
-        vec![("p", "")],
+        vec![
+            NamespaceBinding {
+                prefix: "p",
+                uri: "urn:a",
+            },
+            NamespaceBinding {
+                prefix: "p",
+                uri: "urn:b",
+            },
+        ],
+        vec![NamespaceBinding {
+            prefix: "xml",
+            uri: "urn:wrong",
+        }],
+        vec![NamespaceBinding {
+            prefix: "p",
+            uri: "",
+        }],
     ] {
         assert!(XmlSchema::with_namespaces(vec![], &bindings).is_err());
     }

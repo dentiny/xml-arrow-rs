@@ -7,7 +7,9 @@ use futures_util::{
     io::{AsyncBufRead, AsyncReadExt, BufReader, Cursor},
     stream, FutureExt, TryStreamExt,
 };
-use xml_arrow::{Limit, ReadError, ReaderOptions, XmlField, XmlReader, XmlSchema};
+use xml_arrow::{
+    Limit, NamespaceBinding, ReadError, ReaderOptions, XmlField, XmlReader, XmlSchema,
+};
 
 fn schema() -> XmlSchema {
     XmlSchema::new(vec![XmlField::new("id", "@id", Int64, false)]).unwrap()
@@ -48,7 +50,10 @@ fn split_tokens_utf8_and_namespace_context_survive_batch_boundaries() {
                 XmlField::new("id", "@id", Int64, false),
                 XmlField::new("name", "r:title", Utf8, true),
             ],
-            &[("r", "urn:rows&records")],
+            &[NamespaceBinding {
+                prefix: "r",
+                uri: "urn:rows&records",
+            }],
         )
         .unwrap();
         let xml = r#"<root xmlns="urn:rows&amp;records" xmlns:n="http://www.w3.org/2001/XMLSchema-instance">

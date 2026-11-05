@@ -1,6 +1,6 @@
 [package]
 name = "xml-arrow"
-description = "Explicit-schema XML record conversion to Apache Arrow batches"
+description = "XML record conversion to Apache Arrow batches"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -23,3 +23,7 @@ futures-executor.workspace = true
 [[example]]
 name = "convert"
 path = "../../examples/convert.rs"
+
+[[example]]
+name = "infer"
+path = "../../examples/infer.rs"

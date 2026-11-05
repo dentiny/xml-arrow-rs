@@ -1,4 +1,6 @@
-use crate::{XmlBatchBuilder, XmlSchema};
+use std::collections::VecDeque;
+
+use crate::{NamespaceBinding, XmlBatchBuilder, XmlSchema};
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use futures_util::io::{AsyncBufRead, AsyncReadExt, Chain, Cursor, Take};
@@ -10,7 +12,12 @@ use quick_xml::{
 };
 use tokio_util::compat::{Compat, FuturesAsyncReadCompatExt};
 
-use super::{error::Result, validation::validate_reader, Limit, Name, ReadError, ReaderOptions};
+use super::{
+    error::Result,
+    inference::Inference,
+    validation::{validate_inference, validate_reader},
+    InferenceOptions, Limit, Name, ReadError, ReaderOptions,
+};
 
 struct Record {
     xml: String,
@@ -37,7 +44,7 @@ pub(super) struct ReaderState<R> {
     options: ReaderOptions,
     builder: XmlBatchBuilder,
     // Record deferred by the batch byte limit.
-    pending: Option<Record>,
+    pending: VecDeque<Record>,
     // Counts records across batches.
     record_index: u64,
 }
@@ -50,16 +57,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
         options: ReaderOptions,
     ) -> Result<Self> {
         let path = validate_reader(&schema, path, &options)?;
-        let builder = match options.projection.as_deref() {
-            Some(indices) => XmlBatchBuilder::new_projected(schema, options.batch_size, indices),
-            None => XmlBatchBuilder::new(schema, options.batch_size),
-        }
-        .map_err(|error| {
-            ReadError::Configuration(match error {
-                crate::Error::Configuration(message) => message,
-                error => error.to_string(),
-            })
-        })?;
+        let builder = builder(schema, &options)?;
         let mut reader =
             NsReader::from_reader(Cursor::new(Vec::new()).chain(input).take(0).compat());
         reader.config_mut().check_comments = true;
@@ -71,9 +69,64 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             bom_bytes: 0,
             options,
             builder,
-            pending: None,
+            pending: VecDeque::new(),
             record_index: 0,
         })
+    }
+
+    pub(super) async fn infer(
+        input: R,
+        path: &str,
+        bindings: &[NamespaceBinding<'_>],
+        options: ReaderOptions,
+        sampling: InferenceOptions,
+    ) -> Result<Self> {
+        validate_inference(&sampling)?;
+        let schema =
+            XmlSchema::with_namespaces(vec![], bindings).map_err(ReadError::configuration)?;
+        let mut parsing_options = options.clone();
+        parsing_options.projection = None;
+        let mut state = Self::new(input, schema, path, parsing_options)?;
+        let mut inference = Inference::default();
+        let mut buffer = Vec::new();
+        let mut bytes = 0;
+        while state.pending.len() < sampling.max_records {
+            let Some(record) = state.next_record(&mut buffer).await? else {
+                break;
+            };
+            if record.xml.len() > sampling.max_bytes - bytes {
+                if state.pending.is_empty() {
+                    return Err(ReadError::limit(
+                        Limit::SampleBytes,
+                        sampling.max_bytes,
+                        record.byte_offset,
+                    ));
+                }
+                state.pending.push_back(record);
+                break;
+            }
+            inference
+                .observe(&record.xml)
+                .map_err(|source| ReadError::Conversion {
+                    record_index: state.pending.len() as u64 + 1,
+                    byte_offset: record.byte_offset,
+                    source,
+                })?;
+            bytes += record.xml.len();
+            state.pending.push_back(record);
+            if bytes == sampling.max_bytes {
+                break;
+            }
+        }
+        let schema = if state.pending.is_empty() {
+            XmlSchema::with_namespaces(vec![], bindings)
+        } else {
+            inference.finish(bindings)
+        }
+        .map_err(ReadError::configuration)?;
+        state.builder = builder(schema, &options)?;
+        state.options = options;
+        Ok(state)
     }
 
     pub(super) fn schema(&self) -> SchemaRef {
@@ -85,7 +138,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
         let mut bytes = 0usize;
         let mut last_offset = 0;
         while !self.builder.is_full() {
-            let record = match self.pending.take() {
+            let record = match self.pending.pop_front() {
                 Some(record) => Some(record),
                 None => self.next_record(&mut buffer).await?,
             };
@@ -95,7 +148,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             if !self.builder.is_empty()
                 && bytes.saturating_add(record.xml.len()) > self.options.max_batch_bytes
             {
-                self.pending = Some(record);
+                self.pending.push_front(record);
                 break;
             }
             self.record_index += 1;
@@ -336,4 +389,12 @@ impl Capture {
             byte_offset: self.byte_offset,
         })
     }
+}
+
+fn builder(schema: XmlSchema, options: &ReaderOptions) -> Result<XmlBatchBuilder> {
+    match options.projection.as_deref() {
+        Some(indices) => XmlBatchBuilder::new_projected(schema, options.batch_size, indices),
+        None => XmlBatchBuilder::new(schema, options.batch_size),
+    }
+    .map_err(ReadError::configuration)
 }

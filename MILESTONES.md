@@ -1,7 +1,7 @@
 # XML to Arrow milestones
 
 Implement one reviewable PR at a time, in dependency order. This checkout
-implements milestones 1–4. Fixture-only PRs can land between functional
+implements milestones 1–5. Fixture-only PRs can land between functional
 milestones, so milestone numbers are independent of GitHub PR numbers.
 No CI or CLI is planned.
 

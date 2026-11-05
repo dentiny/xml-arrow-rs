@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use arrow_schema::DataType;
 
-use crate::{Error, Result, XmlField};
+use crate::{Error, NamespaceBinding, Result, XmlField};
 
 pub(crate) fn validate_fields(
     fields: &[XmlField],
@@ -44,9 +44,11 @@ pub(crate) fn validate_fields(
     Ok(())
 }
 
-pub(crate) fn validate_namespaces(bindings: &[(&str, &str)]) -> Result<HashMap<String, String>> {
+pub(crate) fn validate_namespaces(
+    bindings: &[NamespaceBinding<'_>],
+) -> Result<HashMap<String, String>> {
     let mut namespaces = HashMap::from([("xml".into(), roxmltree::NS_XML_URI.into())]);
-    for &(prefix, uri) in bindings {
+    for &NamespaceBinding { prefix, uri } in bindings {
         if !valid_name(prefix)
             || prefix == "xmlns"
             || uri.is_empty()

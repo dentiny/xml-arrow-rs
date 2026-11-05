@@ -1,6 +1,6 @@
 use arrow_array::{cast::AsArray, types::Int64Type, Array};
 use arrow_schema::DataType::{Int64, Utf8};
-use xml_arrow::{XmlBatchBuilder, XmlField, XmlSchema};
+use xml_arrow::{NamespaceBinding, XmlBatchBuilder, XmlField, XmlSchema};
 
 const POM: &str = include_str!("../../../testdata/lancedb-pom.xml");
 const TOPOLOGY: &str = include_str!("../../../testdata/azure-ndv5-topology.xml");
@@ -45,7 +45,10 @@ fn converts_real_maven_pom_with_default_namespace_and_dependencies() {
                 XmlField::new("item", "m:module", Utf8, false),
             ),
         ],
-        &[("m", "http://maven.apache.org/POM/4.0.0")],
+        &[NamespaceBinding {
+            prefix: "m",
+            uri: "http://maven.apache.org/POM/4.0.0",
+        }],
     )
     .unwrap();
     let mut builder = XmlBatchBuilder::new(schema, 1).unwrap();
@@ -199,7 +202,7 @@ mod streaming {
         io::{BufReader, Cursor},
         TryStreamExt,
     };
-    use xml_arrow::{ReaderOptions, XmlField, XmlReader, XmlSchema};
+    use xml_arrow::{NamespaceBinding, ReaderOptions, XmlField, XmlReader, XmlSchema};
 
     fn batches(xml: &str, schema: XmlSchema, path: &str, batch_size: usize) -> Vec<RecordBatch> {
         let input = BufReader::with_capacity(7, Cursor::new(xml.as_bytes()));
@@ -224,7 +227,10 @@ mod streaming {
                 XmlField::new("version", "m:version", Utf8, false),
                 XmlField::new("scope", "m:scope", Utf8, true),
             ],
-            &[("m", "http://maven.apache.org/POM/4.0.0")],
+            &[NamespaceBinding {
+                prefix: "m",
+                uri: "http://maven.apache.org/POM/4.0.0",
+            }],
         )
         .unwrap();
         let batches = batches(
@@ -311,4 +317,37 @@ mod streaming {
         }
         assert_eq!(device_count, 16);
     }
+}
+
+#[test]
+fn infers_schema_from_real_maven_dependencies() {
+    use futures_util::{io::Cursor, TryStreamExt};
+    use xml_arrow::{InferenceOptions, NamespaceBinding, ReaderOptions, XmlReader};
+    futures_executor::block_on(async {
+        let reader = XmlReader::infer(
+            Cursor::new(POM.as_bytes()),
+            "/m:project/m:dependencyManagement/m:dependencies/m:dependency",
+            &[NamespaceBinding {
+                prefix: "m",
+                uri: "http://maven.apache.org/POM/4.0.0",
+            }],
+            ReaderOptions::default(),
+            InferenceOptions::default(),
+        )
+        .await
+        .unwrap();
+        let batches: Vec<_> = reader.into_stream().try_collect().await.unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].num_rows(), 7);
+        let artifacts = batches[0]
+            .column_by_name("m:artifactId")
+            .unwrap()
+            .as_string::<i32>();
+        assert_eq!(artifacts.value(0), "jackson-bom");
+        assert_eq!(artifacts.value(6), "junit-jupiter");
+        assert_eq!(
+            batches[0].column_by_name("m:scope").unwrap().null_count(),
+            6
+        );
+    });
 }
