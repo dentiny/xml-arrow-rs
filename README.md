@@ -1,11 +1,11 @@
 # xml-arrow-rs
 
 A Rust library for converting XML records into Apache Arrow `RecordBatch` values.
-Column names, XML paths, types, and nullability are explicit. Conversion performs
-no filesystem or network I/O.
+Column names, XML paths, types, and nullability are explicit. Storage access is
+separate from XML parsing and conversion.
 
-This checkout implements **PRs 1–2: scalar and nested conversion with an explicit schema**.
-See [MILESTONES.md](MILESTONES.md) for the remaining PRs.
+This checkout implements **milestones 1–3: explicit scalar/nested conversion and
+asynchronous document reading**. See [MILESTONES.md](MILESTONES.md) for the roadmap.
 
 ## Convert records
 
@@ -93,21 +93,47 @@ scalars, structs, or other lists.
 - Predefined/numeric XML references, CDATA, Unicode, and XML 1.0 line endings.
 - Selected scalar elements cannot repeat or contain child elements.
 - Unmapped content is ignored after XML parsing and input-contract checks.
-- XML parsing, entity decoding, and normalization are delegated to `roxmltree`.
+- Record conversion, entity decoding, and normalization use `roxmltree`.
 - Inputs are decoded Rust strings; declaration metadata does not change decoding.
 - Namespace URI matching and nullable elements via `xsi:nil`.
 - DTDs and custom entities are not supported.
-- No automatic schema inference, record-path reader, storage
-  integration, CLI, CI, or built-in IPC/Parquet export at this stage.
+- No automatic schema inference, storage integration, CLI, CI, or built-in
+  IPC/Parquet export at this stage.
 
-Batch size limits **rows, not bytes**. Callers supply complete records in memory;
+`XmlBatchBuilder` limits **rows, not bytes**. Callers supply complete records in memory;
 the converter builds a read-only tree for one record during conversion, then
-retains only the pending Arrow columns. This stage does not enforce application
-record-size or depth limits. `Utf8` and `List` use 32-bit offsets; exceeding their
+retains only the pending Arrow columns. The builder does not enforce application
+record-size or depth limits; `XmlReader` adds these limits. `Utf8` and `List` use 32-bit offsets; exceeding their
 format limits returns an error before any columns are changed.
 
 See the [schema contract](docs/schema.md) for exact conversion and error behavior.
-Future asynchronous and OpenDAL APIs will live in a separate `xml-io` crate.
+
+## Read XML documents asynchronously
+
+`xml_arrow::XmlReader` accepts one UTF-8 document through
+`futures::io::AsyncBufRead + Unpin + Send`; no Tokio runtime is required.
+Record paths include the root, e.g. `/catalog/book`. Prefixes use schema URI
+bindings; unprefixed steps select names without a namespace.
+
+```rust,ignore
+let mut reader = XmlReader::new(input, schema, "/catalog/book", ReaderOptions::default())?;
+while let Some(batch) = reader.next_batch().await? {
+    // Consume each Arrow batch, or use reader.into_stream().
+}
+```
+
+See the [compiled example](crates/xml-arrow/src/lib.rs),
+[reader API](crates/xml-arrow/src/reader/mod.rs), and
+[options and defaults](crates/xml-arrow/src/reader/options.rs).
+Construction performs no I/O. Pending reads may be cancelled and resumed.
+The first error discards the unfinished batch and ends the reader; read to EOF
+to validate the entire document. Empty input is an error; a valid document with
+no matching records returns `None`.
+
+Limits apply to skipped content too. Batch bytes count serialized records with
+inherited namespaces, with at most one lookahead record; caller buffers may
+read ahead. These are input limits, not Arrow allocation or RSS limits.
+Storage access remains a later milestone in `xml-io`.
 
 ## Development
 

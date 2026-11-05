@@ -97,7 +97,7 @@ impl XmlField {
 #[derive(Clone, Debug)]
 pub struct XmlSchema {
     pub(crate) fields: Vec<XmlField>,
-    pub(crate) arrow: SchemaRef,
+    arrow: SchemaRef,
     pub(crate) namespaces: HashMap<String, String>,
 }
 

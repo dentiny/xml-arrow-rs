@@ -12,6 +12,13 @@ exclude = ["tests/real_xml.rs"]
 arrow-array.workspace = true
 arrow-schema.workspace = true
 roxmltree.workspace = true
+thiserror.workspace = true
+futures-util.workspace = true
+quick-xml.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+futures-executor = "0.3"
 
 [[example]]
 name = "convert"
