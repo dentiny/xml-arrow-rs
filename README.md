@@ -1,11 +1,12 @@
 # xml-arrow-rs
 
 A Rust library for converting XML records into Apache Arrow `RecordBatch` values.
-Column names, XML paths, types, and nullability are explicit. Storage access is
+Map columns explicitly or infer them from a bounded sample. Storage access is
 separate from XML parsing and conversion.
 
-This checkout implements **milestones 1–5: explicit conversion, asynchronous
-document reading, storage inputs, and bounded schema inference**. See [MILESTONES.md](MILESTONES.md) for the roadmap.
+This checkout implements **milestones 1–6: explicit conversion, asynchronous
+document reading, storage inputs, bounded schema inference, and performance
+baselines**. See [MILESTONES.md](MILESTONES.md) for the roadmap.
 
 ## Convert records
 
@@ -184,6 +185,13 @@ For remote storage, pass a configured OpenDAL operator to
 `XmlFile::new(operator, "object/key.xml")`. Its root, credentials, transport, and
 layers are preserved. `source_uri()` provides the absolute local path or supplied
 object key as a source label; it does not add columns to Arrow batches.
+
+## Examples and performance
+
+The [runnable examples](examples/README.md) cover conversion, streaming,
+namespace bindings, projection, inference, and storage access.
+[Reader benchmarks](docs/benchmarks.md) provide flat, wide, nested, and large-record
+throughput and peak-memory baselines for explicit and inferred schemas.
 
 ## Development
 

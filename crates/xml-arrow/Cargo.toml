@@ -18,6 +18,7 @@ quick-xml.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 futures-executor.workspace = true
 
 [[example]]
@@ -27,3 +28,11 @@ path = "../../examples/convert.rs"
 [[example]]
 name = "infer"
 path = "../../examples/infer.rs"
+
+[[example]]
+name = "stream"
+path = "../../examples/stream.rs"
+
+[[bench]]
+name = "reader"
+harness = false
