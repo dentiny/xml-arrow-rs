@@ -14,7 +14,7 @@ Add the library and its companion types to your application:
 
 ```toml
 [dependencies]
-xml-arrow = { git = "https://github.com/dentiny/xml-arrow-rs" }
+xml-arrow = "0.1"
 arrow-schema = "58"
 futures-util = { version = "0.3", features = ["io"] }
 futures-executor = "0.3"
@@ -71,7 +71,7 @@ To read a local `books.xml` with the same `/catalog/book` structure, also add
 these entries under `[dependencies]`:
 
 ```toml
-xml-io = { git = "https://github.com/dentiny/xml-arrow-rs" }
+xml-io = "0.1"
 tokio = { version = "1", features = ["macros", "rt"] }
 ```
 
