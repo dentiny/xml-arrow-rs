@@ -1,5 +1,3 @@
-use std::io::{self, Write};
-
 use crate::{XmlBatchBuilder, XmlSchema};
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
@@ -20,7 +18,7 @@ struct Record {
 }
 
 struct Capture {
-    writer: Writer<BoundedBuffer>,
+    writer: Writer<Vec<u8>>,
     byte_offset: u64,
 }
 
@@ -186,10 +184,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                     };
                     if capture.is_none() && self.stack == self.path {
                         capture = Some(Capture {
-                            writer: Writer::new(BoundedBuffer {
-                                bytes: Vec::new(),
-                                limit: self.options.max_record_bytes,
-                            }),
+                            writer: Writer::new(Vec::new()),
                             byte_offset: before,
                         });
                     }
@@ -223,7 +218,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                 event => event,
             };
             if let Some(record) = &mut capture {
-                record.write(event, self.position())?;
+                record.write(event, self.position(), self.options.max_record_bytes)?;
             } else if !matches!(event, Event::End(_)) {
                 self.validate(event, before)?;
             }
@@ -338,37 +333,23 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
 }
 
 impl Capture {
-    fn write(&mut self, event: Event<'_>, byte_offset: u64) -> Result<()> {
-        let limit = self.writer.get_ref().limit;
+    fn write(&mut self, event: Event<'_>, byte_offset: u64, limit: usize) -> Result<()> {
         self.writer
             .write_event(event)
-            .map_err(|_| ReadError::limit(Limit::RecordBytes, limit, byte_offset))
+            .map_err(|source| ReadError::xml(byte_offset, source))?;
+        // Check after each event; input events are bounded separately.
+        if self.writer.get_ref().len() > limit {
+            return Err(ReadError::limit(Limit::RecordBytes, limit, byte_offset));
+        }
+        Ok(())
     }
 
     fn finish(self) -> Result<Record> {
-        let xml = String::from_utf8(self.writer.into_inner().bytes)
+        let xml = String::from_utf8(self.writer.into_inner())
             .map_err(|source| ReadError::xml(self.byte_offset, source))?;
         Ok(Record {
             xml,
             byte_offset: self.byte_offset,
         })
-    }
-}
-
-struct BoundedBuffer {
-    bytes: Vec<u8>,
-    limit: usize,
-}
-
-impl Write for BoundedBuffer {
-    fn write(&mut self, input: &[u8]) -> io::Result<usize> {
-        if input.len() > self.limit - self.bytes.len() {
-            return Err(io::Error::other("XML record exceeds byte limit"));
-        }
-        self.bytes.extend_from_slice(input);
-        Ok(input.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
     }
 }

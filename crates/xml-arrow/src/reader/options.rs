@@ -10,6 +10,8 @@ pub struct ReaderOptions {
     pub batch_size: usize,
     /// Maximum serialized bytes per record, including inherited namespaces.
     /// Also limits bytes consumed for each XML event. Default: 8 MiB.
+    /// Record size is checked after each serialized event, so temporary buffers
+    /// may exceed this limit.
     pub max_record_bytes: usize,
     /// Maximum sum of serialized input-record bytes represented by one batch.
     /// Arrow allocations depend on the schema; this is not an RSS limit.
