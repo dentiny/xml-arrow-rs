@@ -1,13 +1,10 @@
-use std::path::Path;
-
 use opendal::{services::Fs, Operator};
 use xml_arrow::{InferenceOptions, NamespaceBinding, ReaderOptions, XmlReader};
 use xml_io::file::XmlFile;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata")).canonicalize()?;
-    let root = root.to_str().ok_or("fixture path must be UTF-8")?;
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata");
     let files = [
         XmlFile::from_uri(&format!("{root}/lancedb-pom.xml"))?,
         XmlFile::new(Operator::new(Fs::default().root(root))?, "lancedb-pom.xml")?,

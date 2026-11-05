@@ -5,7 +5,7 @@ use std::{borrow::Cow, io};
 use futures_util::{io::AsyncBufRead, TryStreamExt};
 use opendal::{services::Fs, Operator};
 
-use crate::validation::{local_path_parts, validate_local_path, validate_object_path};
+use crate::validation::{validate_local_path, validate_local_path_parts, validate_object_path};
 
 /// A reopenable storage input.
 ///
@@ -53,10 +53,10 @@ impl XmlFile {
         let (operator, path) = match &self.operator {
             Some(operator) => (operator.clone(), Cow::Borrowed(self.path.as_str())),
             None => {
-                let (root, path) = local_path_parts(&self.path)?;
+                let (root, path) = validate_local_path_parts(&self.path).await?;
                 // Avoid creating input directories.
-                let operator = Operator::new(Fs::default().root(root))?;
-                (operator, path)
+                let operator = Operator::new(Fs::default().root(&root))?;
+                (operator, Cow::Owned(path))
             }
         };
         Ok(operator
