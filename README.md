@@ -5,8 +5,8 @@ Map columns explicitly or infer them from a bounded sample. Storage access is
 separate from XML parsing and conversion.
 
 This checkout implements **milestones 1–6: explicit conversion, asynchronous
-document reading, storage inputs, bounded schema inference, and performance
-baselines**. See [MILESTONES.md](MILESTONES.md) for the roadmap.
+document reading, storage inputs, bounded schema inference, and usage
+examples**. See [MILESTONES.md](MILESTONES.md) for the roadmap.
 
 ## Convert records
 
@@ -186,12 +186,10 @@ For remote storage, pass a configured OpenDAL operator to
 layers are preserved. `source_uri()` provides the absolute local path or supplied
 object key as a source label; it does not add columns to Arrow batches.
 
-## Examples and performance
+## Examples
 
 The [runnable examples](examples/README.md) cover conversion, streaming,
 namespace bindings, projection, inference, and storage access.
-[Reader benchmarks](docs/benchmarks.md) provide flat, wide, nested, and large-record
-throughput and peak-memory baselines for explicit and inferred schemas.
 
 ## Development
 

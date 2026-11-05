@@ -20,5 +20,4 @@ a large document retains all output batches.
 
 The [mapping contract](../docs/schema.md) covers nested structs/lists, empty and
 missing values, nil, inference merging, and conversion errors. The
-[README](../README.md) documents input limits and storage behavior; the
-[benchmarks](../docs/benchmarks.md) measure in-memory document reading.
+[README](../README.md) documents input limits and storage behavior.
