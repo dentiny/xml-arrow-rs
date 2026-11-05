@@ -1,213 +1,282 @@
 # xml-arrow-rs
 
-A Rust library for converting XML records into Apache Arrow `RecordBatch` values.
-Map columns explicitly or infer them from a bounded sample. Storage access is
-separate from XML parsing and conversion.
+Convert XML records into Apache Arrow `RecordBatch` values in Rust. Define your
+column mappings explicitly, or infer a schema from a bounded sample.
 
-This checkout implements **milestones 1–6: explicit conversion, asynchronous
-document reading, storage inputs, bounded schema inference, and usage
-examples**. See [MILESTONES.md](MILESTONES.md) for the roadmap.
+| Crate | Use it for |
+| --- | --- |
+| `xml-arrow` | XML parsing, schema mappings, inference, and Arrow batches. |
+| `xml-io` | Opening local files, file URLs, and objects through OpenDAL. |
 
-## Convert records
+## Quick start
+
+Add the library and its companion types to your application:
+
+```toml
+[dependencies]
+xml-arrow = { git = "https://github.com/dentiny/xml-arrow-rs" }
+arrow-schema = "58"
+futures-util = { version = "0.3", features = ["io"] }
+futures-executor = "0.3"
+```
+
+Choose the record path and map fields relative to each record. Here,
+`/catalog/book` selects one row per `<book>`, `@id` reads its attribute, and
+`title` and `price` read child elements. The last argument to `XmlField::new`
+sets nullability.
 
 ```rust
-use arrow_schema::DataType;
-use xml_arrow::{XmlBatchBuilder, XmlField, XmlSchema};
+use arrow_schema::DataType::{Float64, Int64, Utf8};
+use futures_util::io::Cursor;
+use xml_arrow::{ReaderOptions, XmlField, XmlReader, XmlSchema};
 
-let schema = XmlSchema::new(vec![
-    XmlField::new("id", "@id", DataType::Int64, false),
-    XmlField::new("title", "title", DataType::Utf8, false),
-    XmlField::new("price", "price", DataType::Float64, true),
-])?;
-let mut builder = XmlBatchBuilder::new(schema, 1024)?;
-builder.append_xml(
-    r#"<book id="7"><title>Rust &amp; Arrow</title><price>29.5</price></book>"#,
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let schema = XmlSchema::new(vec![
+        XmlField::new("id", "@id", Int64, false),
+        XmlField::new("title", "title", Utf8, false),
+        XmlField::new("price", "price", Float64, true),
+    ])?;
+    let input = Cursor::new(br#"<catalog>
+        <book id="7"><title>Rust &amp; Arrow</title><price>29.5</price></book>
+        <book id="8"><title>XML</title></book>
+    </catalog>"#);
+    let mut reader = XmlReader::new(
+        input, schema, "/catalog/book", ReaderOptions::default(),
+    )?;
+    futures_executor::block_on(async {
+        while let Some(batch) = reader.next_batch().await? {
+            println!("{} rows, {} columns", batch.num_rows(), batch.num_columns());
+        }
+        xml_arrow::ReaderResult::Ok(())
+    })?;
+    Ok(())
+}
+```
+
+This produces one batch with two rows and three columns:
+
+| id | title | price |
+| ---: | --- | ---: |
+| 7 | Rust & Arrow | 29.5 |
+| 8 | XML | null |
+
+`XmlReader` accepts `futures::io::AsyncBufRead + Unpin + Send`. In-memory reading
+works with the futures executor, as above. Process each batch in the loop to
+release its memory before reading the next; `reader.into_stream()` provides the
+same batches as a futures stream.
+
+## Read a file and infer its schema
+
+To read a local `books.xml` with the same `/catalog/book` structure, also add
+these entries under `[dependencies]`:
+
+```toml
+xml-io = { git = "https://github.com/dentiny/xml-arrow-rs" }
+tokio = { version = "1", features = ["macros", "rt"] }
+```
+
+This complete example uses Tokio for filesystem access and infers the columns:
+
+```rust
+use xml_arrow::{InferenceOptions, ReaderOptions, XmlReader};
+use xml_io::file::XmlFile;
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let file = XmlFile::from_uri("books.xml")?;
+    let mut reader = XmlReader::infer(
+        file.open().await?,
+        "/catalog/book",
+        &[],
+        ReaderOptions::default(),
+        InferenceOptions::default(),
+    ).await?;
+    println!("{}", reader.schema());
+    while let Some(batch) = reader.next_batch().await? {
+        println!("{} rows", batch.num_rows());
+    }
+    Ok(())
+}
+```
+
+To supply known columns instead, pass the schema to
+`XmlReader::new(file.open().await?, schema, "/catalog/book", options)`.
+
+`XmlFile::from_uri` accepts local paths and `file://` URLs. Relative paths are
+fixed against the current directory at construction; `..` is resolved when
+opened, following filesystem symlinks. Each `open()` starts an independent read.
+For other storage services, use `XmlFile::new(operator, "object/key.xml")` with
+your configured OpenDAL operator. Its credentials, root, transport, and layers
+are preserved. Import `opendal` directly when configuring an operator.
+
+Inference samples up to **128 records or 8 MiB** by default, then replays the
+sample before continuing on the same input. It works with non-seekable streams.
+All inferred fields are nullable; attribute columns use names such as `@id`.
+Integers and floats merge into `Float64`; other scalar type mixtures become
+`Utf8`. Empty scalars and nil-only fields also use `Utf8`. Repeated siblings
+become lists and nested elements become structs.
+
+The inferred schema stays fixed. Later new fields are ignored; values that
+violate mapped types or repetition rules return conversion errors. Set
+`InferenceOptions::max_records` and `max_bytes` to change the sample bounds.
+One additional complete record may be retained at the byte boundary, bounded
+by `max_record_bytes`; a first record larger than the sample budget is an error.
+
+## Map XML fields
+
+Column names are your output names; XML paths determine where values come from.
+Paths are relative to the selected record or enclosing struct/list item.
+
+| Field path | Reads |
+| --- | --- |
+| `@id` | Attribute on the current element. |
+| `title` | Direct child element. |
+| `author/name` | A nested element. |
+| `author/@id` | Attribute on a nested element. |
+| `.` | Direct text of the current element, including CDATA. |
+| `b:title` | A child in the namespace bound to `b`. |
+
+These are case-sensitive paths with terminal attributes, rather than XPath
+expressions. Wildcards, predicates, `..`, and absolute field paths are rejected.
+The record path passed to `XmlReader` is absolute and includes the document root.
+
+Supported types are `Utf8`, `Boolean`, `Int64`, finite `Float64`, `Struct`, and
+`List`. Numeric and boolean conversion trims XML whitespace; `Boolean` accepts
+`true`, `false`, `1`, and `0`. Strings preserve normalized XML text. A missing
+nullable value becomes null, while `<title/>` is a present empty string. Empty
+or invalid numeric values still fail when nullable. Repeated scalar elements
+require a list mapping; scalar text cannot contain child elements.
+
+### Nested values and namespaces
+
+Use `structure` for one nested element and `list` for a container of repeated
+items. Schema prefixes match namespace URIs, independently of input prefixes:
+
+```rust
+use arrow_schema::DataType::{Int64, Utf8};
+use xml_arrow::{NamespaceBinding, XmlBatchBuilder, XmlField, XmlSchema};
+
+let schema = XmlSchema::with_namespaces(
+    vec![
+        XmlField::structure("author", "b:author", true, vec![
+            XmlField::new("id", "@id", Int64, false),
+            XmlField::new("name", "b:name", Utf8, false),
+        ]),
+        XmlField::list("tags", "b:tags", true,
+            XmlField::new("item", "b:tag", Utf8, true)),
+    ],
+    &[NamespaceBinding { prefix: "b", uri: "urn:books" }],
 )?;
-let batch = builder.flush()?.unwrap();
-assert_eq!(batch.num_rows(), 1);
-assert_eq!(batch.num_columns(), 3);
-```
-
-The output is one row: `id = 7`, `title = "Rust & Arrow"`, `price = 29.5`.
-Each `append_xml` call receives one complete record element, not an entire
-multi-record document. Flush when `builder.is_full()` before appending again;
-flush once more at end of input to emit a partial batch. Empty flushes return
-`None`. Errors leave earlier rows intact and the builder reusable.
-
-Run the in-memory Rust example:
-
-```sh
-cargo run --example convert -p xml-arrow
-```
-
-## Select columns
-
-```rust,ignore
-// Given the schema above, output title followed by id. Skip price conversion.
-let builder = XmlBatchBuilder::new_projected(schema.clone(), 1024, &[1, 0])?;
-// Count records without output columns. XML syntax is still checked.
-let counter = XmlBatchBuilder::new_projected(schema, 1024, &[])?;
-```
-
-Projection uses zero-based schema indices, preserves requested order, and rejects
-duplicates or out-of-range indices. Required values and scalar conversion are
-checked only for selected columns.
-
-## Nested fields and namespaces
-
-```rust
-use xml_arrow::NamespaceBinding;
-
-let schema = XmlSchema::with_namespaces(vec![
-    XmlField::structure("author", "b:author", true, vec![
-        XmlField::new("id", "@id", DataType::Int64, false),
-        XmlField::new("name", "b:name", DataType::Utf8, false),
-    ]),
-    XmlField::list("tags", "b:tags", true,
-        XmlField::new("item", "b:tag", DataType::Utf8, true)),
-], &[NamespaceBinding { prefix: "b", uri: "urn:books" }])?;
 let mut builder = XmlBatchBuilder::new(schema, 1024)?;
 builder.append_xml(r#"<book xmlns="urn:books">
     <author id="7"><name>Jane</name></author>
     <tags><tag>Rust</tag><tag>Arrow</tag></tags>
 </book>"#)?;
+let batch = builder.flush()?.unwrap();
+assert_eq!(batch.num_rows(), 1);
 ```
 
-The `author` struct contains `{id: 7, name: "Jane"}` and `tags` is
-`["Rust", "Arrow"]`. Schema prefixes match by URI, independently of the XML's
-prefixes or default namespace. Unprefixed paths select names without a namespace;
-unprefixed attributes such as `@id` stay outside the default namespace.
+The row contains `author = {id: 7, name: "Jane"}` and
+`tags = ["Rust", "Arrow"]`. Child paths are relative to their parent. An empty
+list container yields `[]`; a missing nullable container yields null. For
+unwrapped repeated elements, use `.` as the list container path. Items may be
+scalars, structs, or lists.
 
-Struct child paths are relative to the selected parent. A list path selects one
-container; its item path selects repeated values inside it. An existing empty
-container becomes `[]`, while a missing nullable container becomes null. For
-unwrapped repeated elements, use `.` as the list container path. Lists can contain
-scalars, structs, or other lists.
+Bind prefixes the same way for namespaced record paths, such as
+`/b:catalog/b:book`. Pass bindings as the third argument to `XmlReader::infer`;
+unbound sampled URIs receive generated prefixes such as `ns0`. Inferred fields
+sort by URI (no namespace first), then name. Unprefixed paths match elements
+without a namespace; a default namespace does not apply to unprefixed attributes.
 
-`xsi:nil="true"` or `"1"` produces null when the mapped field is nullable. The
-`xsi` prefix may differ, but its URI must be
-`http://www.w3.org/2001/XMLSchema-instance`. Non-nullable fields reject nil.
+`xsi:nil="true"` or `"1"` yields null for a nullable mapped element. The prefix
+can differ, but its URI must be `http://www.w3.org/2001/XMLSchema-instance`.
+Required fields reject nil. Nil elements allow attributes and whitespace, with
+no child elements or non-whitespace text. Structs/lists reject mixed text and
+child elements.
 
-## Scope
+### Select columns
 
-- `Utf8`, `Boolean`, `Int64`, finite `Float64`, `Struct`, and `List` columns.
-- Relative descendant paths, terminal attributes, and record text (`.`).
-- Missing nullable fields become null; present empty strings remain empty.
-- Predefined/numeric XML references, CDATA, Unicode, and XML 1.0 line endings.
-- Selected scalar elements cannot repeat or contain child elements.
-- Unmapped content is ignored after XML parsing and input-contract checks.
-- Record conversion, entity decoding, and normalization use `roxmltree`.
-- Inputs are decoded Rust strings; declaration metadata does not change decoding.
-- Namespace URI matching and nullable elements via `xsi:nil`.
-- DTDs and custom entities are not supported.
-- No CLI, CI, or built-in IPC/Parquet export at this stage.
+For the quick-start schema `[id, title, price]`, request title followed by id:
 
-`XmlBatchBuilder` limits **rows, not bytes**. Callers supply complete records in memory;
-the converter builds a read-only tree for one record during conversion, then
-retains only the pending Arrow columns. The builder does not enforce application
-record-size or depth limits; `XmlReader` adds these limits. `Utf8` and `List` use 32-bit offsets; exceeding their
-format limits returns an error before any columns are changed.
+```rust
+use xml_arrow::ReaderOptions;
 
-See the [schema contract](docs/schema.md) for exact conversion and error behavior.
-
-## Read XML documents asynchronously
-
-`xml_arrow::XmlReader` accepts one UTF-8 document through
-`futures::io::AsyncBufRead + Unpin + Send`; no Tokio runtime is required.
-Record paths include the root, e.g. `/catalog/book`. Prefixes use schema URI
-bindings; unprefixed steps select names without a namespace.
-
-```rust,ignore
-let mut reader = XmlReader::new(input, schema, "/catalog/book", ReaderOptions::default())?;
-while let Some(batch) = reader.next_batch().await? {
-    // Consume each Arrow batch, or use reader.into_stream().
-}
+let options = ReaderOptions {
+    projection: Some(vec![1, 0]),
+    ..Default::default()
+};
 ```
 
-See the [compiled example](crates/xml-arrow/src/lib.rs),
-[reader API](crates/xml-arrow/src/reader/mod.rs), and
-[options and defaults](crates/xml-arrow/src/reader/options.rs).
-Construction performs no I/O. Pending reads may be cancelled and resumed.
-The first error discards the unfinished batch and ends the reader; read to EOF
-to validate the entire document. Empty input is an error; a valid document with
-no matching records returns `None`.
+Pass these options to `XmlReader::new`. With `infer`, indices address the inferred
+field order. For manual record conversion,
+use `XmlBatchBuilder::new_projected(schema, 1024, &[1, 0])`. Only selected fields
+are converted; XML syntax is still checked. An empty projection counts rows
+without output columns. Duplicate or out-of-range indices are errors.
 
-Limits apply to skipped content too. Batch bytes count serialized records with
-inherited namespaces, with at most one lookahead record; caller buffers may
-read ahead. These are input limits, not Arrow allocation or RSS limits.
+## Convert individual records
 
-## Infer a schema
+If you already have complete XML record strings, use `XmlBatchBuilder` directly:
 
-`XmlReader::infer(input, record_path, bindings, reader_options, inference_options)`
-samples complete records, fixes the schema, then replays the sample before reading
-more input. It works without seek or reopening storage. `NamespaceBinding { prefix, uri }` entries have
-the same meaning as in `XmlSchema::with_namespaces`; pass `&[]` when unused.
+```rust
+use arrow_schema::DataType::Int64;
+use xml_arrow::{XmlBatchBuilder, XmlField, XmlSchema};
 
-```sh
-cargo run --example infer -p xml-arrow
+let schema = XmlSchema::new(vec![XmlField::new("id", "@id", Int64, false)])?;
+let mut builder = XmlBatchBuilder::new(schema, 1024)?;
+builder.append_xml(r#"<book id="7"/>"#)?;
+let batch = builder.flush()?.unwrap();
+assert_eq!(batch.num_rows(), 1);
 ```
 
-`InferenceOptions` defaults to 128 records and 8 MiB of sampled serialized XML,
-including inherited namespaces. Both limits must be positive. Sampling stops at
-either limit; a record that would exceed the byte budget is retained for replay
-but excluded from inference. At most one such record is read ahead, bounded by
-`ReaderOptions::max_record_bytes`. If the first record exceeds the sample budget,
-inference returns `Limit::SampleBytes`. These bounds cover retained record XML,
-not total I/O, Arrow allocations, or RSS; skipped content can still be read.
+Each append accepts one complete element. Flush when `is_full()` before adding
+another record, then flush once at EOF for remaining rows. An empty flush returns
+`None`. A failed append leaves earlier rows intact and the builder reusable.
+This builder limits rows; use `XmlReader` for document-level byte/depth limits.
 
-Inferred fields are nullable and ordered by namespace URI and local name.
-Attribute names start with `@`; text-only records use `.`. Nested elements become
-structs, and elements repeated within a sampled parent become lists. Unwrapped
-lists use `.` as their container, so absent items become `[]`. Fields discovered
-after sampling are ignored, as with explicit mappings. Known fields retain their
-inferred types; incompatible later values fail during conversion.
+## Limits and errors
 
-See the [inference rules](docs/schema.md#inference) for merging and namespace rules.
-Cancelling the inference constructor drops its input; returned readers retain the
-usual cancellation/resume behavior of `next_batch`.
+`ReaderOptions` defaults:
 
-## Open storage inputs
+| Option | Default |
+| --- | ---: |
+| `batch_size` | 1024 rows |
+| `max_record_bytes` | 8 MiB per record or XML event |
+| `max_batch_bytes` | 64 MiB of serialized records |
+| `max_depth` | 128 elements |
+| `projection` | All columns |
 
-`xml-io` handles storage access and returns byte readers; it has no production
-dependency on `xml-arrow`. `XmlFile::from_uri` accepts local paths and file URLs.
-Relative paths are made absolute at construction, without opening the input.
-Local paths containing `..` are resolved through the filesystem when opened,
-preserving traversal through symlinks. `source_uri()` keeps the absolute input path.
-Each `open()` starts an independent stream; object access errors can occur on
-open or during reading. Local filesystem reads require a Tokio runtime.
+Depth and event-size limits apply to skipped content too. `max_batch_bytes` must be at least
+`max_record_bytes`; byte limits count XML, including inherited namespaces, rather
+than Arrow memory. One lookahead record and caller read-ahead buffers may also
+be retained. `Utf8` and `List` use Arrow's 32-bit offsets.
 
-```rust,ignore
-use xml_io::file::XmlFile;
+Inputs must be UTF-8; XML encoding declarations do not transcode input. XML
+references, CDATA, and Unicode are supported. DTDs and custom entities are rejected.
+Unmapped content is ignored after parsing and input validation.
 
-let file = XmlFile::from_uri("books.xml")?;
-let reader = XmlReader::new(file.open().await?, schema, "/catalog/book", ReaderOptions::default())?;
-```
+Read to EOF to validate the whole document. Empty input is an error; a valid
+document with no matching records yields no batches. A reader error discards
+the unfinished batch and ends the stream. Cancelled `next_batch()` calls can
+resume without losing partial records.
 
-For remote storage, pass a configured OpenDAL operator to
-`XmlFile::new(operator, "object/key.xml")`. Its root, credentials, transport, and
-layers are preserved. `source_uri()` provides the absolute local path or supplied
-object key as a source label; it does not add columns to Arrow batches.
+## Run the examples
 
-## Examples
+From the repository root:
 
-The [runnable examples](examples/README.md) cover conversion, streaming,
-namespace bindings, projection, inference, and storage access.
+| Command | Demonstrates |
+| --- | --- |
+| `cargo run -p xml-arrow --example convert` | Explicit mappings and record conversion. |
+| `cargo run -p xml-arrow --example stream` | Batches, namespaces, and projection. |
+| `cargo run -p xml-arrow --example infer` | Inference and consuming a batch stream. |
+| `cargo run -p xml-io --example storage` | Local paths and configured operators using real XML. |
 
-## Development
+See the [example guide](examples/README.md) and the checked-in
+[XML fixtures](testdata/README.md). To check a local change:
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
-```
-
-Dependencies use Arrow 58, matching the local `atif-arrow` reference project.
-The [testdata](testdata/README.md) directory contains checked-in real project XML
-snapshots, provenance, and third-party licenses. The `real_xml` integration tests
-read those complete XML files and verify their Arrow output offline:
-
-```sh
-cargo test -p xml-arrow --test real_xml
 ```
 
 Licensed under [MIT](LICENSE).

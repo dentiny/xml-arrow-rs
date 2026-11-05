@@ -18,6 +18,5 @@ Use `next_batch()` to process and release batches incrementally. The small
 `infer` example collects its two rows to demonstrate `into_stream()`; collecting
 a large document retains all output batches.
 
-The [mapping contract](../docs/schema.md) covers nested structs/lists, empty and
-missing values, nil, inference merging, and conversion errors. The
-[README](../README.md) documents input limits and storage behavior.
+The [README](../README.md) explains field mappings, nested values, namespaces,
+inference, input limits, and error behavior.
