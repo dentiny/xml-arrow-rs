@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, io};
 
 /// A result using this crate's [`ReadError`] type.
 pub type Result<T> = std::result::Result<T, ReadError>;
@@ -56,6 +56,21 @@ impl ReadError {
         Self::Xml {
             byte_offset,
             source: Box::new(source),
+        }
+    }
+
+    pub(super) fn invalid(byte_offset: u64, message: &str) -> Self {
+        Self::xml(
+            byte_offset,
+            io::Error::new(io::ErrorKind::InvalidData, message.to_owned()),
+        )
+    }
+
+    pub(super) fn limit(kind: Limit, limit: usize, byte_offset: u64) -> Self {
+        Self::LimitExceeded {
+            kind,
+            limit,
+            byte_offset,
         }
     }
 }

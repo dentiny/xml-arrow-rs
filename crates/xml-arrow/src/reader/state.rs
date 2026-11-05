@@ -162,7 +162,11 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             self.reader.get_mut().get_mut().set_limit(allowance);
             let event = self.reader.read_event_into_async(buffer).await;
             if allowance - self.reader.get_mut().get_mut().limit() > limit {
-                return Err(self.limit(Limit::EventBytes, self.options.max_record_bytes));
+                return Err(ReadError::limit(
+                    Limit::EventBytes,
+                    self.options.max_record_bytes,
+                    self.position(),
+                ));
             }
             let event = event
                 .map_err(|source| {
@@ -196,16 +200,25 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                     }
                 }
                 Event::DocType(_) => {
-                    return Err(self.invalid(before, "DTDs and custom entities are not supported"))
+                    return Err(ReadError::invalid(
+                        before,
+                        "DTDs and custom entities are not supported",
+                    ))
                 }
                 Event::Eof => {
                     if !self.root_seen || !self.stack.is_empty() {
-                        return Err(self.invalid(before, "expected one complete XML document"));
+                        return Err(ReadError::invalid(
+                            before,
+                            "expected one complete XML document",
+                        ));
                     }
                     return Ok(None);
                 }
                 Event::Decl(_) if before != self.bom_bytes => {
-                    return Err(self.invalid(before, "XML declaration must be at the beginning"));
+                    return Err(ReadError::invalid(
+                        before,
+                        "XML declaration must be at the beginning",
+                    ));
                 }
                 event => event,
             };
@@ -226,11 +239,18 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
 
     fn enter(&mut self, name: QName<'_>) -> Result<()> {
         if self.stack.len() == self.options.max_depth {
-            return Err(self.limit(Limit::Depth, self.options.max_depth));
+            return Err(ReadError::limit(
+                Limit::Depth,
+                self.options.max_depth,
+                self.position(),
+            ));
         }
         if self.stack.is_empty() {
             if self.root_seen {
-                return Err(self.invalid(self.position(), "multiple document elements"));
+                return Err(ReadError::invalid(
+                    self.position(),
+                    "multiple document elements",
+                ));
             }
             self.root_seen = true;
         }
@@ -288,7 +308,10 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                 _ => false,
             };
             if !outside {
-                return Err(self.invalid(position, "content outside the document element"));
+                return Err(ReadError::invalid(
+                    position,
+                    "content outside the document element",
+                ));
             }
         }
         let mut writer = Writer::new(Vec::new());
@@ -312,21 +335,6 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
     fn position(&self) -> u64 {
         self.reader.buffer_position() + self.bom_bytes
     }
-
-    fn invalid(&self, byte_offset: u64, message: &str) -> ReadError {
-        ReadError::xml(
-            byte_offset,
-            io::Error::new(io::ErrorKind::InvalidData, message.to_owned()),
-        )
-    }
-
-    fn limit(&self, kind: Limit, limit: usize) -> ReadError {
-        ReadError::LimitExceeded {
-            kind,
-            limit,
-            byte_offset: self.position(),
-        }
-    }
 }
 
 impl Capture {
@@ -334,11 +342,7 @@ impl Capture {
         let limit = self.writer.get_ref().limit;
         self.writer
             .write_event(event)
-            .map_err(|_| ReadError::LimitExceeded {
-                kind: Limit::RecordBytes,
-                limit,
-                byte_offset,
-            })
+            .map_err(|_| ReadError::limit(Limit::RecordBytes, limit, byte_offset))
     }
 
     fn finish(self) -> Result<Record> {
