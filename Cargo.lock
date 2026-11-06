@@ -1316,6 +1316,7 @@ dependencies = [
  "quick-xml 0.41.0",
  "roxmltree",
  "thiserror",
+ "tokio",
  "tokio-util",
 ]
 
