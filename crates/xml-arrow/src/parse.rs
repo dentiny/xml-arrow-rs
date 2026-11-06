@@ -84,7 +84,11 @@ fn read(
                 .filter(|child| child.is_text())
                 .filter_map(|child| child.text())
                 .collect();
-            convert(field, &text)?
+            if matches!(field.field.data_type(), DataType::Utf8) {
+                Value::Text(text)
+            } else {
+                convert(field, &text)?
+            }
         }
     };
     Ok(value)

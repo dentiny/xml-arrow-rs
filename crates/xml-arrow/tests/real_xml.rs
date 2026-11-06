@@ -197,15 +197,17 @@ mod streaming {
     use super::{POM, TOPOLOGY};
     use arrow_array::{cast::AsArray, types::Int64Type, Array, RecordBatch};
     use arrow_schema::DataType::{Int64, Utf8};
-    use futures_executor::block_on;
-    use futures_util::{
-        io::{BufReader, Cursor},
-        TryStreamExt,
-    };
+    use futures_util::{stream, TryStreamExt};
     use xml_arrow::{NamespaceBinding, ReaderOptions, XmlField, XmlReader, XmlSchema};
 
-    fn batches(xml: &str, schema: XmlSchema, path: &str, batch_size: usize) -> Vec<RecordBatch> {
-        let input = BufReader::with_capacity(7, Cursor::new(xml.as_bytes()));
+    async fn batches(
+        xml: &str,
+        schema: XmlSchema,
+        path: &str,
+        batch_size: usize,
+    ) -> Vec<RecordBatch> {
+        let input =
+            stream::iter(xml.as_bytes().chunks(7).map(Ok::<_, std::io::Error>)).into_async_read();
         let reader = XmlReader::new(
             input,
             schema,
@@ -216,11 +218,11 @@ mod streaming {
             },
         )
         .unwrap();
-        block_on(reader.into_stream().try_collect()).unwrap()
+        reader.into_stream().try_collect().await.unwrap()
     }
 
-    #[test]
-    fn streams_real_pom_dependencies_with_inherited_default_namespace() {
+    #[tokio::test]
+    async fn streams_real_pom_dependencies_with_inherited_default_namespace() {
         let schema = XmlSchema::with_namespaces(
             vec![
                 XmlField::new("artifact", "m:artifactId", Utf8, false),
@@ -238,7 +240,8 @@ mod streaming {
             schema,
             "/m:project/m:dependencyManagement/m:dependencies/m:dependency",
             3,
-        );
+        )
+        .await;
         assert_eq!(
             batches.iter().map(|b| b.num_rows()).collect::<Vec<_>>(),
             vec![3, 3, 1]
@@ -272,8 +275,8 @@ mod streaming {
         );
     }
 
-    #[test]
-    fn streams_real_topology_cpus_as_nested_arrow_rows() {
+    #[tokio::test]
+    async fn streams_real_topology_cpus_as_nested_arrow_rows() {
         let devices = XmlField::list(
             "devices",
             ".",
@@ -301,7 +304,7 @@ mod streaming {
             bridges,
         ])
         .unwrap();
-        let batches = batches(TOPOLOGY, schema, "/system/cpu", 1);
+        let batches = batches(TOPOLOGY, schema, "/system/cpu", 1).await;
         assert_eq!(batches.len(), 2);
         let mut device_count = 0;
         for (numa, batch) in batches.iter().enumerate() {
@@ -317,37 +320,69 @@ mod streaming {
         }
         assert_eq!(device_count, 16);
     }
+    #[tokio::test]
+    async fn selects_real_topology_devices_at_exact_record_depth() {
+        let schema = XmlSchema::new(vec![XmlField::new("bus", "@busid", Utf8, false)]).unwrap();
+        let batches = batches(TOPOLOGY, schema, "/system/cpu/pci/pci", 3).await;
+        assert_eq!(
+            batches.iter().map(|b| b.num_rows()).collect::<Vec<_>>(),
+            [3, 3, 3, 3, 3, 1]
+        );
+        let buses = batches
+            .iter()
+            .flat_map(|b| b.column(0).as_string::<i32>().iter())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            buses,
+            [
+                Some("0001:00:00.0"),
+                Some("0101:00:00.0"),
+                Some("0002:00:00.0"),
+                Some("0102:00:00.0"),
+                Some("0003:00:00.0"),
+                Some("0103:00:00.0"),
+                Some("0008:00:00.0"),
+                Some("0104:00:00.0"),
+                Some("0009:00:00.0"),
+                Some("0105:00:00.0"),
+                Some("000a:00:00.0"),
+                Some("0106:00:00.0"),
+                Some("000b:00:00.0"),
+                Some("0107:00:00.0"),
+                Some("000c:00:00.0"),
+                Some("0108:00:00.0"),
+            ]
+        );
+    }
 }
 
-#[test]
-fn infers_schema_from_real_maven_dependencies() {
+#[tokio::test]
+async fn infers_schema_from_real_maven_dependencies() {
     use futures_util::{io::Cursor, TryStreamExt};
     use xml_arrow::{InferenceOptions, NamespaceBinding, ReaderOptions, XmlReader};
-    futures_executor::block_on(async {
-        let reader = XmlReader::infer(
-            Cursor::new(POM.as_bytes()),
-            "/m:project/m:dependencyManagement/m:dependencies/m:dependency",
-            &[NamespaceBinding {
-                prefix: "m",
-                uri: "http://maven.apache.org/POM/4.0.0",
-            }],
-            ReaderOptions::default(),
-            InferenceOptions::default(),
-        )
-        .await
-        .unwrap();
-        let batches: Vec<_> = reader.into_stream().try_collect().await.unwrap();
-        assert_eq!(batches.len(), 1);
-        assert_eq!(batches[0].num_rows(), 7);
-        let artifacts = batches[0]
-            .column_by_name("m:artifactId")
-            .unwrap()
-            .as_string::<i32>();
-        assert_eq!(artifacts.value(0), "jackson-bom");
-        assert_eq!(artifacts.value(6), "junit-jupiter");
-        assert_eq!(
-            batches[0].column_by_name("m:scope").unwrap().null_count(),
-            6
-        );
-    });
+    let reader = XmlReader::infer(
+        Cursor::new(POM.as_bytes()),
+        "/m:project/m:dependencyManagement/m:dependencies/m:dependency",
+        &[NamespaceBinding {
+            prefix: "m",
+            uri: "http://maven.apache.org/POM/4.0.0",
+        }],
+        ReaderOptions::default(),
+        InferenceOptions::default(),
+    )
+    .await
+    .unwrap();
+    let batches: Vec<_> = reader.into_stream().try_collect().await.unwrap();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].num_rows(), 7);
+    let artifacts = batches[0]
+        .column_by_name("m:artifactId")
+        .unwrap()
+        .as_string::<i32>();
+    assert_eq!(artifacts.value(0), "jackson-bom");
+    assert_eq!(artifacts.value(6), "junit-jupiter");
+    assert_eq!(
+        batches[0].column_by_name("m:scope").unwrap().null_count(),
+        6
+    );
 }
