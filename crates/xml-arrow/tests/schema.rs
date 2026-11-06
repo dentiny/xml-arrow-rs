@@ -78,3 +78,37 @@ fn rejects_invalid_nested_mappings_and_namespace_bindings() {
         assert!(XmlSchema::with_namespaces(vec![], &bindings).is_err());
     }
 }
+
+#[test]
+fn reader_options_validate_paths_limits_and_projection_without_input() {
+    use xml_arrow::ReaderOptions;
+    let schema = XmlSchema::new(vec![XmlField::new(
+        "id",
+        "@id",
+        arrow_schema::DataType::Int64,
+        false,
+    )])
+    .unwrap();
+    assert!(ReaderOptions::default()
+        .validate(&schema, "/root/row")
+        .is_ok());
+    assert!(ReaderOptions::default()
+        .validate(&schema, "root/row")
+        .is_err());
+    for options in [
+        ReaderOptions {
+            projection: Some(vec![0, 0]),
+            ..Default::default()
+        },
+        ReaderOptions {
+            projection: Some(vec![1]),
+            ..Default::default()
+        },
+        ReaderOptions {
+            max_record_bytes: 0,
+            ..Default::default()
+        },
+    ] {
+        assert!(options.validate(&schema, "/root/row").is_err());
+    }
+}

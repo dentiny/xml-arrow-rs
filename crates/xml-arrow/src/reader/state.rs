@@ -39,6 +39,8 @@ pub(super) struct ReaderState<R> {
     stack: Vec<Name>,
     // Detect empty documents and repeated roots.
     root_seen: bool,
+    // Reuse scratch space when validating skipped events.
+    validation_buffer: Vec<u8>,
     // Add stripped BOM bytes back to error offsets.
     bom_bytes: u64,
     options: ReaderOptions,
@@ -66,6 +68,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             path,
             stack: Vec::new(),
             root_seen: false,
+            validation_buffer: Vec::new(),
             bom_bytes: 0,
             options,
             builder,
@@ -198,6 +201,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             let limit = (self.options.max_record_bytes as u64).saturating_add(bom);
             let allowance = limit.saturating_add(1);
             self.reader.get_mut().get_mut().set_limit(allowance);
+            buffer.clear();
             let event = self.reader.read_event_into_async(buffer).await;
             if allowance - self.reader.get_mut().get_mut().limit() > limit {
                 return Err(ReadError::limit(
@@ -206,12 +210,9 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                     self.position(),
                 ));
             }
-            let event = event
-                .map_err(|source| {
-                    ReadError::xml(self.reader.buffer_position() + self.bom_bytes, source)
-                })?
-                .into_owned();
-            buffer.clear();
+            let event = event.map_err(|source| {
+                ReadError::xml(self.reader.buffer_position() + self.bom_bytes, source)
+            })?;
             let empty = matches!(event, Event::Empty(_));
             let closes = empty || matches!(event, Event::End(_));
             let event = match event {
@@ -307,7 +308,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
         Ok(())
     }
 
-    fn with_namespaces(&self, mut start: BytesStart<'static>) -> Result<BytesStart<'static>> {
+    fn with_namespaces<'b>(&self, mut start: BytesStart<'b>) -> Result<BytesStart<'b>> {
         let keys = start
             .attributes()
             .map(|attr| attr.map(|attr| attr.key.as_ref().to_vec()))
@@ -330,7 +331,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
     }
 
     // quick-xml does not fully validate skipped content.
-    fn validate(&self, event: Event<'_>, position: u64) -> Result<()> {
+    fn validate(&mut self, event: Event<'_>, position: u64) -> Result<()> {
         if self.stack.is_empty() {
             let outside = match &event {
                 Event::Text(text) => text
@@ -347,7 +348,8 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                 ));
             }
         }
-        let mut writer = Writer::new(Vec::new());
+        self.validation_buffer.clear();
+        let mut writer = Writer::new(&mut self.validation_buffer);
         match event {
             Event::Start(start) | Event::Empty(start) => writer.write_event(Event::Empty(start)),
             Event::Decl(_) => writer
@@ -359,9 +361,9 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                 .and_then(|_| writer.write_event(Event::End(BytesEnd::new("check")))),
         }
         .map_err(|source| ReadError::xml(position, source))?;
-        let xml = String::from_utf8(writer.into_inner())
+        let xml = std::str::from_utf8(&self.validation_buffer)
             .map_err(|source| ReadError::xml(position, source))?;
-        roxmltree::Document::parse(&xml).map_err(|source| ReadError::xml(position, source))?;
+        roxmltree::Document::parse(xml).map_err(|source| ReadError::xml(position, source))?;
         Ok(())
     }
 

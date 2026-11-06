@@ -14,8 +14,8 @@ Add the library and its companion types to your application:
 
 ```toml
 [dependencies]
-xml-arrow = "0.1"
-arrow-schema = "58"
+xml-arrow = "0.2"
+arrow-schema = "59.3.0"
 futures-util = { version = "0.3", features = ["io"] }
 futures-executor = "0.3"
 ```
@@ -71,7 +71,7 @@ To read a local `books.xml` with the same `/catalog/book` structure, also add
 these entries under `[dependencies]`:
 
 ```toml
-xml-io = "0.1"
+xml-io = "0.2"
 tokio = { version = "1", features = ["macros", "rt"] }
 ```
 
@@ -255,3 +255,15 @@ references, CDATA, and Unicode are supported. DTDs and custom entities are rejec
 Unmapped content is ignored after parsing and input validation.
 
 Licensed under [MIT](LICENSE).
+
+## Reader throughput check
+
+Run `cargo run -p xml-arrow --release --example reader_throughput` for an in-memory
+check of small selected records, nested selected records, and skipped content.
+Input generation is outside the timer; each result is the median of five reads.
+This measures parsing/conversion rather than storage or decompression throughput.
+The reader still serializes selected records and parses each with roxmltree;
+projection skips field conversion, not record input or XML parsing.
+
+Version 0.2 uses Arrow 59.3; applications using 0.1/Arrow 58 must upgrade their
+companion Arrow dependencies together.

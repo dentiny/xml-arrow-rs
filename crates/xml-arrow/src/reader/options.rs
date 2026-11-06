@@ -54,3 +54,20 @@ impl Default for InferenceOptions {
         }
     }
 }
+
+impl ReaderOptions {
+    /// Validates limits, the record path and projection without reading input.
+    pub fn validate(
+        &self,
+        schema: &crate::XmlSchema,
+        record_path: &str,
+    ) -> super::ReaderResult<()> {
+        super::validation::validate_reader(schema, record_path, self)?;
+        if let Some(indices) = &self.projection {
+            schema
+                .project(indices)
+                .map_err(super::ReadError::configuration)?;
+        }
+        Ok(())
+    }
+}
