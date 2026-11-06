@@ -4,7 +4,7 @@ use xml_io::file::XmlFile;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata");
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../xml-arrow/testdata");
     let files = [
         XmlFile::from_uri(&format!("{root}/lancedb-pom.xml"))?,
         XmlFile::new(Operator::new(Fs::default().root(root))?, "lancedb-pom.xml")?,

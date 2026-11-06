@@ -2,8 +2,8 @@ use arrow_array::{cast::AsArray, types::Int64Type, Array};
 use arrow_schema::DataType::{Int64, Utf8};
 use xml_arrow::{NamespaceBinding, XmlBatchBuilder, XmlField, XmlSchema};
 
-const POM: &str = include_str!("../../../testdata/lancedb-pom.xml");
-const TOPOLOGY: &str = include_str!("../../../testdata/azure-ndv5-topology.xml");
+const POM: &str = include_str!("../testdata/lancedb-pom.xml");
+const TOPOLOGY: &str = include_str!("../testdata/azure-ndv5-topology.xml");
 
 #[test]
 fn converts_real_maven_pom_with_default_namespace_and_dependencies() {
