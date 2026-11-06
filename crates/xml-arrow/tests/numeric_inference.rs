@@ -3,7 +3,7 @@ use arrow_schema::DataType;
 use futures_util::{io::Cursor, TryStreamExt};
 use xml_arrow::{InferenceOptions, ReaderOptions, XmlReader};
 
-const NUMBERS: &[u8] = include_bytes!("../../../testdata/numeric-boundaries.xml");
+const NUMBERS: &[u8] = include_bytes!("../testdata/numeric-boundaries.xml");
 
 async fn infer(path: &str) -> XmlReader<'static> {
     XmlReader::infer(

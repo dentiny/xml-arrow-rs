@@ -47,8 +47,8 @@ checks batching, inherited namespaces, optional fields, and nested device lists.
 Run `cargo test -p xml-arrow --test real_xml`, or `cargo test --workspace`.
 Tests use the snapshots stored in Git and require no network access.
 
-These integration tests are checkout-only and excluded from the published crate
-archives, since their data files live at the workspace root.
+These fixtures, licenses and integration tests are included in the published
+`xml-arrow` crate and can be tested directly from the unpacked package.
 
 ## Numeric boundary regression fixture
 
@@ -57,5 +57,4 @@ exact-integer boundary and the Int64 limits. It is not a production dataset.
 `tests/numeric_inference.rs` reads it to reproduce lossy promotion in both sample
 orders, preserve pure Int64 columns, and check oversized integer literals. Real
 schema inference is separately covered by the unmodified Maven POM above.
-This fixture-dependent regression test is checkout-only and excluded from crate
-archives, just like `real_xml.rs`.
+The numeric fixture and its regression test are packaged with the crate too.

@@ -6,8 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 readme = "../../README.md"
-# Uses workspace-root fixtures.
-exclude = ["tests/real_xml.rs", "tests/numeric_inference.rs"]
 
 [dependencies]
 arrow-array.workspace = true
