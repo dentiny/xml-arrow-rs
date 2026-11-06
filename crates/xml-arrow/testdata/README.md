@@ -1,7 +1,7 @@
 # Real XML fixtures
 
-These are complete, unmodified configuration/topology files from local checkouts
-of public projects. They are real project files rather than generated XML test
+The two production snapshots below are complete, unmodified configuration/topology
+files from local checkouts of public projects. They are real project files rather than generated XML test
 snippets or a large document corpus. The XML files are stored directly in Git.
 
 ## LanceDB Maven POM
@@ -51,3 +51,12 @@ Tests use the snapshots stored in Git and require no network access.
 
 These fixtures, licenses and integration tests are included in the published
 `xml-arrow` crate and can be tested directly from the unpacked package.
+
+## Numeric boundary regression fixture
+
+`numeric-boundaries.xml` contains deliberately constructed cases at the Float64
+exact-integer boundary and the Int64 limits. It is not a production dataset.
+`tests/numeric_inference.rs` reads it to reproduce lossy promotion in both sample
+orders, preserve pure Int64 columns, and check oversized integer literals. Real
+schema inference is separately covered by the unmodified Maven POM above.
+The numeric fixture and its regression test are packaged with the crate too.

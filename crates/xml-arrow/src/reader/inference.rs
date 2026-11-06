@@ -15,7 +15,11 @@ enum Kind {
     #[default]
     Unknown,
     Empty,
-    Scalar(DataType),
+    Scalar {
+        data_type: DataType,
+        // Whether every sampled integer can be represented exactly as Float64.
+        exact_float: bool,
+    },
     Object(Fields),
 }
 
@@ -93,15 +97,34 @@ impl Kind {
             (Self::Empty, Self::Empty) => {}
             (kind @ Self::Empty, Self::Object(fields)) => *kind = Self::Object(fields),
             (Self::Object(_), Self::Empty) => {}
-            (kind @ Self::Empty, Self::Scalar(_)) | (kind @ Self::Scalar(_), Self::Empty) => {
-                *kind = Self::Scalar(DataType::Utf8)
+            (kind @ Self::Empty, Self::Scalar { .. })
+            | (kind @ Self::Scalar { .. }, Self::Empty) => {
+                *kind = Self::Scalar {
+                    data_type: DataType::Utf8,
+                    exact_float: true,
+                }
             }
-            (Self::Scalar(left), Self::Scalar(right)) => {
+            (
+                Self::Scalar {
+                    data_type: left,
+                    exact_float: left_exact,
+                },
+                Self::Scalar {
+                    data_type: right,
+                    exact_float: right_exact,
+                },
+            ) => {
+                *left_exact &= right_exact;
                 if *left != right {
-                    *left = match (&*left, right) {
-                        (DataType::Int64, DataType::Float64)
-                        | (DataType::Float64, DataType::Int64) => DataType::Float64,
-                        _ => DataType::Utf8,
+                    *left = if *left_exact
+                        && matches!(
+                            (&*left, right),
+                            (DataType::Int64, DataType::Float64)
+                                | (DataType::Float64, DataType::Int64)
+                        ) {
+                        DataType::Float64
+                    } else {
+                        DataType::Utf8
                     };
                 }
             }
@@ -166,7 +189,7 @@ impl Shape {
         };
         match self.kind {
             Kind::Unknown | Kind::Empty => XmlField::new(&path, &path, DataType::Utf8, true),
-            Kind::Scalar(data_type) => XmlField::new(&path, &path, data_type, true),
+            Kind::Scalar { data_type, .. } => XmlField::new(&path, &path, data_type, true),
             Kind::Object(fields) => {
                 let children = fields
                     .into_iter()
@@ -237,7 +260,10 @@ fn element(node: Node<'_, '_>, record: bool) -> Result<Kind> {
         fields.insert(
             (None, ".".into()),
             Shape {
-                kind: Kind::Scalar(DataType::Utf8),
+                kind: Kind::Scalar {
+                    data_type: DataType::Utf8,
+                    exact_float: true,
+                },
                 repeated: false,
             },
         );
@@ -250,13 +276,24 @@ fn scalar(value: &str) -> Kind {
     if value.is_empty() {
         return Kind::Empty;
     }
-    Kind::Scalar(if matches!(value, "true" | "false") {
-        DataType::Boolean
-    } else if value.parse::<i64>().is_ok() {
-        DataType::Int64
-    } else if value.parse::<f64>().is_ok_and(f64::is_finite) {
-        DataType::Float64
-    } else {
-        DataType::Utf8
-    })
+    if let Ok(integer) = value.parse::<i64>() {
+        return Kind::Scalar {
+            data_type: DataType::Int64,
+            exact_float: integer as f64 as i128 == i128::from(integer),
+        };
+    }
+    let integer_literal = value
+        .trim_start_matches(['+', '-'])
+        .bytes()
+        .all(|byte| byte.is_ascii_digit());
+    Kind::Scalar {
+        data_type: if matches!(value, "true" | "false") {
+            DataType::Boolean
+        } else if !integer_literal && value.parse::<f64>().is_ok_and(f64::is_finite) {
+            DataType::Float64
+        } else {
+            DataType::Utf8
+        },
+        exact_float: true,
+    }
 }
