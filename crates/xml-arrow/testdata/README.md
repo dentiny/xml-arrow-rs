@@ -48,5 +48,5 @@ exact-depth selection of all 16 device records beneath the repeated PCI elements
 Run `cargo test -p xml-arrow --test real_xml`, or `cargo test --workspace`.
 Tests use the snapshots stored in Git and require no network access.
 
-These integration tests are checkout-only and excluded from the published crate
-archives, since their data files live at the workspace root.
+These fixtures, licenses and integration tests are included in the published
+`xml-arrow` crate and can be tested directly from the unpacked package.
