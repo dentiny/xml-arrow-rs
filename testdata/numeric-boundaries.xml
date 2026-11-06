@@ -1,0 +1,47 @@
+<!-- Constructed regression cases for exact numeric inference, not a production dataset. -->
+<cases>
+  <positive>
+    <row v="9007199254740993"/>
+    <row v="0.5"/>
+  </positive>
+  <positive-reversed>
+    <row v="0.5"/>
+    <row v="9007199254740993"/>
+  </positive-reversed>
+  <maximum>
+    <row v="9223372036854775807"/>
+    <row v="0.5"/>
+  </maximum>
+  <maximum-reversed>
+    <row v="0.5"/>
+    <row v="9223372036854775807"/>
+  </maximum-reversed>
+  <negative>
+    <row v="-9007199254740993"/>
+    <row v="0.5"/>
+  </negative>
+  <negative-reversed>
+    <row v="0.5"/>
+    <row v="-9007199254740993"/>
+  </negative-reversed>
+  <integer-only>
+    <row v="9007199254740993"/>
+    <row v="9223372036854775807"/>
+    <row v="-9007199254740993"/>
+    <row v="1"/>
+  </integer-only>
+  <safe-positive>
+    <row v="9007199254740994"/>
+    <row v="0.5"/>
+  </safe-positive>
+  <safe-minimum>
+    <row v="-9223372036854775808"/>
+    <row v="0.5"/>
+  </safe-minimum>
+  <overflow-positive>
+    <row v="18446744073709551617"/>
+  </overflow-positive>
+  <overflow-negative>
+    <row v="-9223372036854775809"/>
+  </overflow-negative>
+</cases>
