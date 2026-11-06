@@ -255,15 +255,3 @@ references, CDATA, and Unicode are supported. DTDs and custom entities are rejec
 Unmapped content is ignored after parsing and input validation.
 
 Licensed under [MIT](LICENSE).
-
-## Reader throughput check
-
-Run `cargo run -p xml-arrow --release --example reader_throughput` for an in-memory
-check of small selected records, nested selected records, and skipped content.
-Input generation is outside the timer; each result is the median of five reads.
-This measures parsing/conversion rather than storage or decompression throughput.
-The reader still serializes selected records and parses each with roxmltree;
-projection skips field conversion, not record input or XML parsing.
-
-Version 0.2 uses Arrow 59.3; applications using 0.1/Arrow 58 must upgrade their
-companion Arrow dependencies together.

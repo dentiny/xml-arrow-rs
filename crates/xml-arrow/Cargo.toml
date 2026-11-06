@@ -32,7 +32,3 @@ path = "../../examples/infer.rs"
 [[example]]
 name = "stream"
 path = "../../examples/stream.rs"
-
-[[example]]
-name = "reader_throughput"
-path = "../../examples/reader_throughput.rs"
