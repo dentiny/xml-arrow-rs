@@ -40,10 +40,11 @@ when deliberately updating a fixture.
 - The topology test checks 2 CPUs, 8 bridges, 16 devices, nested list offsets,
   numeric attributes, device identifiers, and class values.
 
-The `streaming` module in that same test file reads the XML through `XmlReader` using
-7-byte stream chunks adapted with `into_async_read()`. It selects each managed dependency or CPU as a record and
+The `streaming` module reads fixture bytes directly through an asynchronous
+`Cursor`. It selects each managed dependency or CPU as a record and
 checks batching, inherited namespaces, optional fields, nested device lists, and
 exact-depth selection of all 16 device records beneath the repeated PCI elements.
+Dedicated reader tests cover fragmented input and cancellation separately.
 
 Run `cargo test -p xml-arrow --test real_xml`, or `cargo test --workspace`.
 Tests use the snapshots stored in Git and require no network access.
