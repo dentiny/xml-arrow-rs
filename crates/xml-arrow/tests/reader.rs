@@ -218,9 +218,9 @@ fn malformed_documents_fail_and_configuration_is_checked_before_io() {
             "<root/><root/>",
             "\u{FEFF}\u{FEFF}<root/>",
             "<!DOCTYPE root><root/>",
-            "<root><skip a='1' a='2'/></root>",
-            "<root><1bad/></root>",
-            "<root><skip>&unknown;</skip></root>",
+            "<root><row id='1' a='1' a='2'/></root>",
+            "<root><row id='1'><1bad/></row></root>",
+            "<root><row id='1'>&unknown;</row></root>",
         ] {
             let mut reader = read(Cursor::new(xml.as_bytes()), Default::default());
             assert!(reader.next_batch().await.is_err(), "{xml}");
@@ -292,5 +292,16 @@ fn first_batch_does_not_read_the_tail_and_drop_releases_input() {
         assert_eq!(reader.next_batch().await.unwrap().unwrap().num_rows(), 1);
         drop(reader);
         assert!(source.position() < 30);
+    });
+}
+
+#[test]
+fn skipped_content_is_not_reparsed() {
+    block_on(async {
+        let xml = b"<root><skip a='1' a='2'>&unknown;</skip><row id='7'/></root>";
+        let mut reader = read(input(xml), ReaderOptions::default());
+        let batch = reader.next_batch().await.unwrap().unwrap();
+        assert_eq!(ids(&batch, 0), &[7]);
+        assert!(reader.next_batch().await.unwrap().is_none());
     });
 }
