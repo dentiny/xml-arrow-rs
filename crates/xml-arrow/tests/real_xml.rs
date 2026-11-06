@@ -197,7 +197,7 @@ mod streaming {
     use super::{POM, TOPOLOGY};
     use arrow_array::{cast::AsArray, types::Int64Type, Array, RecordBatch};
     use arrow_schema::DataType::{Int64, Utf8};
-    use futures_util::{stream, TryStreamExt};
+    use futures_util::{io::Cursor, TryStreamExt};
     use xml_arrow::{NamespaceBinding, ReaderOptions, XmlField, XmlReader, XmlSchema};
 
     async fn batches(
@@ -206,8 +206,7 @@ mod streaming {
         path: &str,
         batch_size: usize,
     ) -> Vec<RecordBatch> {
-        let input =
-            stream::iter(xml.as_bytes().chunks(7).map(Ok::<_, std::io::Error>)).into_async_read();
+        let input = Cursor::new(xml.as_bytes());
         let reader = XmlReader::new(
             input,
             schema,
