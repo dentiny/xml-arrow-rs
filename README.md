@@ -112,8 +112,9 @@ are preserved. Import `opendal` directly when configuring an operator.
 Inference samples up to **128 records or 8 MiB** by default, then replays the
 sample before continuing on the same input. It works with non-seekable streams.
 All inferred fields are nullable; attribute columns use names such as `@id`.
-Integers and floats merge into `Float64`; other scalar type mixtures become
-`Utf8`. Empty scalars and nil-only fields also use `Utf8`. Repeated siblings
+Integers and floats merge into `Float64` when every sampled integer is exactly
+representable as a float; otherwise they become `Utf8`. Integer literals outside
+`Int64` also use `Utf8`. Other scalar type mixtures become `Utf8`. Empty scalars and nil-only fields also use `Utf8`. Repeated siblings
 become lists and nested elements become structs.
 
 The inferred schema stays fixed. Later new fields are ignored; values that
