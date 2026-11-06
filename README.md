@@ -14,8 +14,8 @@ Add the library and its companion types to your application:
 
 ```toml
 [dependencies]
-xml-arrow = "0.1"
-arrow-schema = "58"
+xml-arrow = "0.2"
+arrow-schema = "59.3.0"
 futures-util = { version = "0.3", features = ["io"] }
 futures-executor = "0.3"
 ```
@@ -71,7 +71,7 @@ To read a local `books.xml` with the same `/catalog/book` structure, also add
 these entries under `[dependencies]`:
 
 ```toml
-xml-io = "0.1"
+xml-io = "0.2"
 tokio = { version = "1", features = ["macros", "rt"] }
 ```
 
@@ -210,7 +210,7 @@ let options = ReaderOptions {
 Pass these options to `XmlReader::new`. With `infer`, indices address the inferred
 field order. For manual record conversion,
 use `XmlBatchBuilder::new_projected(schema, 1024, &[1, 0])`. Only selected fields
-are converted; XML syntax is still checked. An empty projection counts rows
+are converted; selected record XML syntax is still checked. An empty projection counts rows
 without output columns. Duplicate or out-of-range indices are errors.
 
 ## Convert individual records
@@ -252,6 +252,10 @@ be retained. `Utf8` and `List` use Arrow's 32-bit offsets.
 
 Inputs must be UTF-8; XML encoding declarations do not transcode input. XML
 references, CDATA, and Unicode are supported. DTDs and custom entities are rejected.
-Unmapped content is ignored after parsing and input validation.
+Selected records are parsed and validated in full, including unmapped fields.
+Outside selected records, content is only tokenized by quick-xml to locate record
+boundaries and preserve document structure and event/depth limits. It is not
+reparsed with roxmltree: invalid attribute values or entity references in skipped
+content may therefore go unreported.
 
 Licensed under [MIT](LICENSE).

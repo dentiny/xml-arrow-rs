@@ -5,7 +5,7 @@ use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use futures_util::io::{AsyncBufRead, AsyncReadExt, Chain, Cursor, Take};
 use quick_xml::{
-    events::{attributes::Attribute, BytesEnd, BytesStart, Event},
+    events::{attributes::Attribute, BytesStart, Event},
     name::{Namespace, PrefixDeclaration, QName},
     reader::NsReader,
     Writer, XmlVersion,
@@ -198,6 +198,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             let limit = (self.options.max_record_bytes as u64).saturating_add(bom);
             let allowance = limit.saturating_add(1);
             self.reader.get_mut().get_mut().set_limit(allowance);
+            buffer.clear();
             let event = self.reader.read_event_into_async(buffer).await;
             if allowance - self.reader.get_mut().get_mut().limit() > limit {
                 return Err(ReadError::limit(
@@ -206,28 +207,24 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                     self.position(),
                 ));
             }
-            let event = event
-                .map_err(|source| {
-                    ReadError::xml(self.reader.buffer_position() + self.bom_bytes, source)
-                })?
-                .into_owned();
-            buffer.clear();
+            let event = event.map_err(|source| {
+                ReadError::xml(self.reader.buffer_position() + self.bom_bytes, source)
+            })?;
             let empty = matches!(event, Event::Empty(_));
             let closes = empty || matches!(event, Event::End(_));
             let event = match event {
                 Event::Start(start) | Event::Empty(start) => {
                     self.enter(start.name())?;
-                    let start = if capture.is_none() {
-                        self.with_namespaces(start)?
-                    } else {
-                        start
-                    };
-                    if capture.is_none() && self.stack == self.path {
+                    let start = if capture.is_none() && self.stack == self.path {
+                        let start = self.with_namespaces(start)?;
                         capture = Some(Capture {
                             writer: Writer::new(Vec::new()),
                             byte_offset: before,
                         });
-                    }
+                        start
+                    } else {
+                        start
+                    };
                     if empty {
                         Event::Empty(start)
                     } else {
@@ -259,8 +256,21 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             };
             if let Some(record) = &mut capture {
                 record.write(event, self.position(), self.options.max_record_bytes)?;
-            } else if !matches!(event, Event::End(_)) {
-                self.validate(event, before)?;
+            } else if self.stack.is_empty() && !matches!(event, Event::End(_)) {
+                let allowed = match &event {
+                    Event::Text(text) => text
+                        .as_ref()
+                        .iter()
+                        .all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n')),
+                    Event::Decl(_) | Event::Comment(_) | Event::PI(_) => true,
+                    _ => false,
+                };
+                if !allowed {
+                    return Err(ReadError::invalid(
+                        before,
+                        "content outside the document element",
+                    ));
+                }
             }
             let complete = closes && capture.is_some() && self.stack.len() == self.path.len();
             if closes {
@@ -307,7 +317,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
         Ok(())
     }
 
-    fn with_namespaces(&self, mut start: BytesStart<'static>) -> Result<BytesStart<'static>> {
+    fn with_namespaces<'b>(&self, mut start: BytesStart<'b>) -> Result<BytesStart<'b>> {
         let keys = start
             .attributes()
             .map(|attr| attr.map(|attr| attr.key.as_ref().to_vec()))
@@ -327,42 +337,6 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             }
         }
         Ok(start)
-    }
-
-    // quick-xml does not fully validate skipped content.
-    fn validate(&self, event: Event<'_>, position: u64) -> Result<()> {
-        if self.stack.is_empty() {
-            let outside = match &event {
-                Event::Text(text) => text
-                    .as_ref()
-                    .iter()
-                    .all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n')),
-                Event::Decl(_) | Event::Comment(_) | Event::PI(_) => true,
-                _ => false,
-            };
-            if !outside {
-                return Err(ReadError::invalid(
-                    position,
-                    "content outside the document element",
-                ));
-            }
-        }
-        let mut writer = Writer::new(Vec::new());
-        match event {
-            Event::Start(start) | Event::Empty(start) => writer.write_event(Event::Empty(start)),
-            Event::Decl(_) => writer
-                .write_event(event)
-                .and_then(|_| writer.write_event(Event::Empty(BytesStart::new("check")))),
-            _ => writer
-                .write_event(Event::Start(BytesStart::new("check")))
-                .and_then(|_| writer.write_event(event))
-                .and_then(|_| writer.write_event(Event::End(BytesEnd::new("check")))),
-        }
-        .map_err(|source| ReadError::xml(position, source))?;
-        let xml = String::from_utf8(writer.into_inner())
-            .map_err(|source| ReadError::xml(position, source))?;
-        roxmltree::Document::parse(&xml).map_err(|source| ReadError::xml(position, source))?;
-        Ok(())
     }
 
     fn position(&self) -> u64 {

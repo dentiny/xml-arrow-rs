@@ -19,6 +19,7 @@ quick-xml.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]
+tokio.workspace = true
 futures-executor.workspace = true
 
 [[example]]

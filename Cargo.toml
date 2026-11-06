@@ -3,14 +3,14 @@ members = ["crates/xml-arrow", "crates/xml-io"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/dentiny/xml-arrow-rs"
 
 [workspace.dependencies]
-arrow-array = "58"
-arrow-schema = "58"
+arrow-array = "59.3.0"
+arrow-schema = "59.3.0"
 roxmltree = "0.21"
 futures-util = { version = "0.3", default-features = false, features = ["std", "io", "async-await"] }
 quick-xml = { version = "0.41", default-features = false, features = ["async-tokio"] }
@@ -21,4 +21,4 @@ futures-executor = "0.3"
 url = "2"
 tokio = { version = "1", features = ["fs", "macros", "rt"] }
 tempfile = "3"
-xml-arrow = { path = "crates/xml-arrow", version = "0.1.0" }
+xml-arrow = { path = "crates/xml-arrow", version = "0.2.0" }
