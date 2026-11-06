@@ -35,8 +35,8 @@ pub(super) struct ReaderState<R> {
     reader: NsReader<Input<R>>,
     // Record path resolved to namespace URIs.
     path: Vec<Name>,
-    // Current element path, including skipped content.
-    stack: Vec<Name>,
+    // At each depth, whether the current path matches the record-path prefix.
+    stack: Vec<bool>,
     // Detect empty documents and repeated roots.
     root_seen: bool,
     // Add stripped BOM bytes back to error offsets.
@@ -215,7 +215,10 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             let event = match event {
                 Event::Start(start) | Event::Empty(start) => {
                     self.enter(start.name())?;
-                    let start = if capture.is_none() && self.stack == self.path {
+                    let start = if capture.is_none()
+                        && self.stack.len() == self.path.len()
+                        && self.stack.last() == Some(&true)
+                    {
                         let start = self.with_namespaces(start)?;
                         capture = Some(Capture {
                             writer: Writer::new(Vec::new()),
@@ -305,15 +308,18 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             .map(|uri| {
                 Attribute::from((b"xmlns".as_slice(), uri.into_inner()))
                     .normalized_value(XmlVersion::Implicit1_0)
-                    .map(|value| value.into_owned())
                     .map_err(|source| ReadError::xml(self.position(), source))
             })
             .transpose()?
             .filter(|uri| !uri.is_empty());
         let local = std::str::from_utf8(local.as_ref())
-            .map_err(|source| ReadError::xml(self.position(), source))?
-            .to_owned();
-        self.stack.push(Name { uri, local });
+            .map_err(|source| ReadError::xml(self.position(), source))?;
+        let matches = self.stack.last().copied().unwrap_or(true)
+            && self
+                .path
+                .get(self.stack.len())
+                .is_some_and(|name| name.uri.as_deref() == uri.as_deref() && name.local == local);
+        self.stack.push(matches);
         Ok(())
     }
 

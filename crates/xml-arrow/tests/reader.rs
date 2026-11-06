@@ -292,3 +292,23 @@ async fn skipped_content_is_not_reparsed() {
     assert_eq!(ids(&batch, 0), &[7]);
     assert!(reader.next_batch().await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn record_path_matching_recovers_after_skipped_branches() {
+    let xml = b"<root><skip><group><row id='99'/></group></skip><group><row id='1'/><skip><row id='99'/></skip><row id='2'/></group><row id='99'/><group><row id='3'/></group></root>";
+    let mut reader = XmlReader::new(
+        input(xml),
+        schema(),
+        "/root/group/row",
+        ReaderOptions {
+            batch_size: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut rows = Vec::new();
+    while let Some(batch) = reader.next_batch().await.unwrap() {
+        rows.extend_from_slice(ids(&batch, 0));
+    }
+    assert_eq!(rows, [1, 2, 3]);
+}
