@@ -7,7 +7,7 @@ Run from the repository root:
 | `cargo run -p xml-arrow --example convert` | Explicit scalar mappings, record conversion, flushing, and reading Arrow values. |
 | `cargo run -p xml-arrow --example stream` | Incremental batches, namespace bindings, and projected column order. |
 | `cargo run -p xml-arrow --example infer` | Bounded inference and consuming the reader as a batch stream. |
-| `cargo run -p xml-io --example storage` | Local paths and configured OpenDAL operators, using the Maven XML in `crates/xml-arrow/testdata/`. |
+| `cargo run -p xml-io --example storage` | Local paths and configured OpenDAL operators, using the crafted catalog XML in `crates/xml-arrow/testdata/`. |
 
 `convert`, `stream`, and `infer` use in-memory inputs with the futures executor.
 `storage` uses Tokio for local filesystem access and reads the fixture through

@@ -6,16 +6,16 @@ use xml_io::file::XmlFile;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../xml-arrow/testdata");
     let files = [
-        XmlFile::from_uri(&format!("{root}/lancedb-pom.xml"))?,
-        XmlFile::new(Operator::new(Fs::default().root(root))?, "lancedb-pom.xml")?,
+        XmlFile::from_uri(&format!("{root}/catalog.xml"))?,
+        XmlFile::new(Operator::new(Fs::default().root(root))?, "catalog.xml")?,
     ];
     for file in files {
         let mut reader = XmlReader::infer(
             file.open().await?,
-            "/m:project/m:dependencyManagement/m:dependencies/m:dependency",
+            "/c:catalog/c:product",
             &[NamespaceBinding {
-                prefix: "m",
-                uri: "http://maven.apache.org/POM/4.0.0",
+                prefix: "c",
+                uri: "urn:open-arrow-access:catalog",
             }],
             ReaderOptions::default(),
             InferenceOptions::default(),
@@ -25,8 +25,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         while let Some(batch) = reader.next_batch().await? {
             rows += batch.num_rows();
         }
-        assert_eq!(rows, 7);
-        println!("{}: {rows} dependencies", file.source_uri());
+        assert_eq!(rows, 5);
+        println!("{}: {rows} products", file.source_uri());
     }
     Ok(())
 }
