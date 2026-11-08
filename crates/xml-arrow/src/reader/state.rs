@@ -6,7 +6,7 @@ use arrow_schema::SchemaRef;
 use futures_util::io::{AsyncBufRead, AsyncReadExt, Chain, Cursor, Take};
 use quick_xml::{
     events::{attributes::Attribute, BytesStart, Event},
-    name::{Namespace, PrefixDeclaration, QName},
+    name::{Namespace, PrefixDeclaration},
     reader::NsReader,
     Writer, XmlVersion,
 };
@@ -214,7 +214,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             let closes = empty || matches!(event, Event::End(_));
             let event = match event {
                 Event::Start(start) | Event::Empty(start) => {
-                    self.enter(start.name())?;
+                    self.enter(&start)?;
                     let start = if capture.is_none()
                         && self.stack.len() == self.path.len()
                         && self.stack.last() == Some(&true)
@@ -285,7 +285,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
         }
     }
 
-    fn enter(&mut self, name: QName<'_>) -> Result<()> {
+    fn enter(&mut self, start: &BytesStart<'_>) -> Result<()> {
         if self.stack.len() == self.options.max_depth {
             return Err(ReadError::limit(
                 Limit::Depth,
@@ -302,23 +302,40 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             }
             self.root_seen = true;
         }
-        let (namespace, local) = self.reader.resolver().resolve_element(name);
-        let uri = Option::<Namespace<'_>>::try_from(namespace)
-            .map_err(|source| ReadError::xml(self.position(), source))?
-            .map(|uri| {
-                Attribute::from((b"xmlns".as_slice(), uri.into_inner()))
+        // Validate each namespace declaration once, including off-path bindings.
+        // Other skipped attributes retain the reader's existing unchecked policy.
+        for attribute in start.attributes().with_checks(false) {
+            let attribute = attribute.map_err(|source| ReadError::xml(self.position(), source))?;
+            if attribute.key.as_namespace_binding().is_some() {
+                attribute
                     .normalized_value(XmlVersion::Implicit1_0)
-                    .map_err(|source| ReadError::xml(self.position(), source))
-            })
-            .transpose()?
-            .filter(|uri| !uri.is_empty());
+                    .map_err(|source| ReadError::xml(self.position(), source))?;
+            }
+        }
+        let (namespace, local) = self.reader.resolver().resolve_element(start.name());
+        let namespace = Option::<Namespace<'_>>::try_from(namespace)
+            .map_err(|source| ReadError::xml(self.position(), source))?;
         let local = std::str::from_utf8(local.as_ref())
             .map_err(|source| ReadError::xml(self.position(), source))?;
-        let matches = self.stack.last().copied().unwrap_or(true)
-            && self
-                .path
-                .get(self.stack.len())
-                .is_some_and(|name| name.uri.as_deref() == uri.as_deref() && name.local == local);
+        let expected = self
+            .path
+            .get(self.stack.len())
+            .filter(|name| self.stack.last().copied().unwrap_or(true) && name.local == local);
+        let matches = if let Some(expected) = expected {
+            // Descendants and mismatched subtrees cannot match the record path.
+            // Do not rescan their inherited namespace URI for every element.
+            let uri = namespace
+                .map(|uri| {
+                    Attribute::from((b"xmlns".as_slice(), uri.into_inner()))
+                        .normalized_value(XmlVersion::Implicit1_0)
+                        .map_err(|source| ReadError::xml(self.position(), source))
+                })
+                .transpose()?
+                .filter(|uri| !uri.is_empty());
+            expected.uri.as_deref() == uri.as_deref()
+        } else {
+            false
+        };
         self.stack.push(matches);
         Ok(())
     }
