@@ -129,3 +129,35 @@ fn zero_column_projection_preserves_rows_and_checks_xml() {
     let batch = b.flush().unwrap().unwrap();
     assert_eq!((batch.num_rows(), batch.num_columns()), (2, 0));
 }
+
+#[test]
+fn scalar_text_conversion_handles_comments_cdata_and_empty_nodes() {
+    let mut b = builder(vec![
+        XmlField::new("id", "id", Int64, false),
+        XmlField::new("active", "active", Boolean, false),
+        XmlField::new("text", "text", Utf8, false),
+    ]);
+    for input in [
+        "<r><id> 42 </id><active>true</active><text/></r>",
+        "<r><id>4<!-- split -->2</id><active>tr<!-- split -->ue</active><text>A<![CDATA[B]]><!-- split -->C</text></r>",
+    ] {
+        b.append_xml(input).unwrap();
+    }
+    let batch = b.flush().unwrap().unwrap();
+    assert_eq!(
+        batch
+            .column(0)
+            .as_primitive::<Int64Type>()
+            .values()
+            .as_ref(),
+        &[42, 42]
+    );
+    assert!(batch.column(1).as_boolean().value(0));
+    assert!(batch.column(1).as_boolean().value(1));
+    assert_eq!(batch.column(2).as_string::<i32>().value(0), "");
+    assert_eq!(batch.column(2).as_string::<i32>().value(1), "ABC");
+    assert!(b
+        .append_xml("<r><id/><active>true</active><text/></r>")
+        .is_err());
+    assert!(b.is_empty());
+}

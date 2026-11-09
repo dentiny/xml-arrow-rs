@@ -1,17 +1,17 @@
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 use roxmltree::{Document, Node};
 
 use crate::{Result, XmlField, XmlSchema};
 
-pub(crate) enum Value {
+pub(crate) enum Value<'a> {
     Null,
-    Text(String),
+    Text(Cow<'a, str>),
     Boolean(bool),
     Integer(i64),
     Float(f64),
-    Struct(Vec<Value>),
-    List(Vec<Value>),
+    Struct(Vec<Value<'a>>),
+    List(Vec<Value<'a>>),
 }
 
 #[derive(Clone, Copy)]
@@ -20,8 +20,7 @@ enum Source<'a, 'input> {
     Attribute(&'a str),
 }
 
-pub(crate) fn parse(input: &str, schema: &XmlSchema) -> Result<Vec<Value>> {
-    let document = Document::parse(input)?;
+pub(crate) fn parse<'a>(document: &'a Document<'_>, schema: &XmlSchema) -> Result<Vec<Value<'a>>> {
     schema
         .fields
         .iter()
@@ -29,11 +28,11 @@ pub(crate) fn parse(input: &str, schema: &XmlSchema) -> Result<Vec<Value>> {
         .collect()
 }
 
-fn extract(
-    root: Node<'_, '_>,
+fn extract<'a>(
+    root: Node<'a, '_>,
     field: &XmlField,
     namespaces: &HashMap<String, String>,
-) -> Result<Value> {
+) -> Result<Value<'a>> {
     // A direct field is the common scalar/struct/list-container mapping. Resolve
     // it without building intermediate and result Vecs for a one-segment path.
     if !field.path.contains('/') {
@@ -72,15 +71,15 @@ fn extract(
     }
 }
 
-fn read(
-    source: Source<'_, '_>,
+fn read<'a>(
+    source: Source<'a, '_>,
     field: &XmlField,
     namespaces: &HashMap<String, String>,
-) -> Result<Value> {
+) -> Result<Value<'a>> {
     use arrow_schema::DataType;
     let node = match source {
         Source::Element(node) => node,
-        Source::Attribute(value) => return convert(field, value),
+        Source::Attribute(value) => return convert(field, Cow::Borrowed(value)),
     };
     if is_nil(node).map_err(|message| field.error(message))? {
         return null_value(field);
@@ -110,15 +109,24 @@ fn read(
             if node.children().any(|child| child.is_element()) {
                 return Err(field.error("scalar text contains a child element"));
             }
-            let text: String = node
+            let mut parts = node
                 .children()
                 .filter(|child| child.is_text())
-                .filter_map(|child| child.text())
-                .collect();
-            if matches!(field.field.data_type(), DataType::Utf8) {
-                Value::Text(text)
-            } else {
-                convert(field, &text)?
+                .filter_map(|child| child.text());
+            let first = parts.next().unwrap_or("");
+            match parts.next() {
+                // Keep single text nodes borrowed until the row is appended
+                // to Arrow; only split text needs a concatenation buffer.
+                None => convert(field, Cow::Borrowed(first))?,
+                Some(second) => {
+                    let mut text = String::with_capacity(first.len() + second.len());
+                    text.push_str(first);
+                    text.push_str(second);
+                    for part in parts {
+                        text.push_str(part);
+                    }
+                    convert(field, Cow::Owned(text))?
+                }
             }
         }
     };
@@ -186,7 +194,7 @@ fn select<'a, 'input>(
     nodes.into_iter().map(Source::Element).collect()
 }
 
-fn null_value(field: &XmlField) -> Result<Value> {
+fn null_value(field: &XmlField) -> Result<Value<'static>> {
     if field.field.is_nullable() {
         Ok(Value::Null)
     } else {
@@ -212,7 +220,7 @@ fn reject_mixed_content(node: Node<'_, '_>, field: &XmlField) -> Result<()> {
     Ok(())
 }
 
-fn convert(field: &XmlField, value: &str) -> Result<Value> {
+fn convert<'a>(field: &XmlField, value: Cow<'a, str>) -> Result<Value<'a>> {
     use arrow_schema::DataType;
     let trimmed = value.trim_matches([' ', '\t', '\r', '\n']);
     let invalid = || {
@@ -222,7 +230,7 @@ fn convert(field: &XmlField, value: &str) -> Result<Value> {
         ))
     };
     Ok(match field.field.data_type() {
-        DataType::Utf8 => Value::Text(value.to_owned()),
+        DataType::Utf8 => Value::Text(value),
         DataType::Boolean => Value::Boolean(match trimmed {
             "true" | "1" => true,
             "false" | "0" => false,
