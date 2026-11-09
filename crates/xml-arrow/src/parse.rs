@@ -33,42 +33,46 @@ fn extract<'a>(
     field: &XmlField,
     namespaces: &HashMap<String, String>,
 ) -> Result<Value<'a>> {
-    // A direct field is the common scalar/struct/list-container mapping. Resolve
-    // it without building intermediate and result Vecs for a one-segment path.
-    if !field.path.contains('/') {
-        if field.path == "." {
-            return read(Source::Element(root), field, namespaces);
+    // Walk unique path prefixes without allocating a node vector per segment.
+    // Branching prefixes need the general selector: multiple parents may still
+    // yield exactly one final value when the other branches lack that child.
+    let mut current = root;
+    for part in field.path.split('/') {
+        if part == "." {
+            continue;
         }
-        let attribute = field.path.strip_prefix('@');
-        let name = attribute.unwrap_or(&field.path);
+        let attribute = part.strip_prefix('@');
+        let name = attribute.unwrap_or(part);
         let (uri, local) = match name.split_once(':') {
             Some((prefix, local)) => (Some(namespaces[prefix].as_str()), local),
             None => (None, name),
         };
         if attribute.is_some() {
-            return match root.attributes().find(|attr| {
+            return match current.attributes().find(|attr| {
                 attr.namespace().filter(|uri| !uri.is_empty()) == uri && attr.name() == local
             }) {
                 Some(attr) => read(Source::Attribute(attr.value()), field, namespaces),
                 None => null_value(field),
             };
         }
-        let mut nodes = root.children().filter(|node| {
+        let mut nodes = current.children().filter(|node| {
             node.is_element()
                 && node.tag_name().namespace().filter(|uri| !uri.is_empty()) == uri
                 && node.tag_name().name() == local
         });
-        return match (nodes.next(), nodes.next()) {
-            (None, _) => null_value(field),
-            (Some(node), None) => read(Source::Element(node), field, namespaces),
-            _ => Err(field.error("repeated value; use a list item mapping")),
-        };
+        match (nodes.next(), nodes.next()) {
+            (None, _) => return null_value(field),
+            (Some(node), None) => current = node,
+            _ => {
+                return match select(root, &field.path, namespaces).as_slice() {
+                    [] => null_value(field),
+                    [source] => read(*source, field, namespaces),
+                    _ => Err(field.error("repeated value; use a list item mapping")),
+                }
+            }
+        }
     }
-    match select(root, &field.path, namespaces).as_slice() {
-        [] => null_value(field),
-        [source] => read(*source, field, namespaces),
-        _ => Err(field.error("repeated value; use a list item mapping")),
-    }
+    read(Source::Element(current), field, namespaces)
 }
 
 fn read<'a>(
