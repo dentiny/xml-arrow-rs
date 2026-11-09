@@ -19,6 +19,8 @@ use super::{
     InferenceOptions, Limit, Name, ReadError, ReaderOptions,
 };
 
+const MAX_RETAINED_RECORD_BUFFER_BYTES: usize = 64 * 1024;
+
 struct Record {
     xml: String,
     byte_offset: u64,
@@ -165,7 +167,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                 })?;
             bytes += record.xml.len();
             let mut buffer = record.xml.into_bytes();
-            if buffer.capacity() <= 64 * 1024 {
+            if buffer.capacity() <= MAX_RETAINED_RECORD_BUFFER_BYTES {
                 buffer.clear();
                 self.record_buffer = buffer;
             }
