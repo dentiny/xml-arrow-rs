@@ -1307,7 +1307,7 @@ dependencies = [
 
 [[package]]
 name = "xml-arrow"
-version = "0.2.1"
+version = "0.2.3"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -1322,7 +1322,7 @@ dependencies = [
 
 [[package]]
 name = "xml-io"
-version = "0.2.1"
+version = "0.2.3"
 dependencies = [
  "arrow-array",
  "arrow-schema",
