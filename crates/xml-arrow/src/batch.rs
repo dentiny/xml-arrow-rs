@@ -53,7 +53,8 @@ impl XmlBatchBuilder {
         if self.is_full() {
             return Err(Error::BatchFull);
         }
-        let row = parse(input, &self.schema)?;
+        let document = roxmltree::Document::parse(input)?;
+        let row = parse(&document, &self.schema)?;
         for ((column, value), field) in self.columns.iter().zip(&row).zip(&self.schema.fields) {
             validate_capacity(column.as_ref(), field, &[value])?;
         }
