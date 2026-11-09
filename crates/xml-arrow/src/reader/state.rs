@@ -47,6 +47,8 @@ pub(super) struct ReaderState<R> {
     pending: VecDeque<Record>,
     // Counts records across batches.
     record_index: u64,
+    // Reuse ordinary record captures without retaining exceptionally large records.
+    record_buffer: Vec<u8>,
 }
 
 impl<R: AsyncBufRead + Unpin> ReaderState<R> {
@@ -71,6 +73,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             builder,
             pending: VecDeque::new(),
             record_index: 0,
+            record_buffer: Vec::new(),
         })
     }
 
@@ -161,6 +164,11 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                     source,
                 })?;
             bytes += record.xml.len();
+            let mut buffer = record.xml.into_bytes();
+            if buffer.capacity() <= 64 * 1024 {
+                buffer.clear();
+                self.record_buffer = buffer;
+            }
         }
         self.builder
             .flush()
@@ -221,7 +229,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                     {
                         let start = self.with_namespaces(start)?;
                         capture = Some(Capture {
-                            writer: Writer::new(Vec::new()),
+                            writer: Writer::new(std::mem::take(&mut self.record_buffer)),
                             byte_offset: before,
                         });
                         start
