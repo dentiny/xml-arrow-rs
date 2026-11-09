@@ -129,3 +129,49 @@ fn zero_column_projection_preserves_rows_and_checks_xml() {
     let batch = b.flush().unwrap().unwrap();
     assert_eq!((batch.num_rows(), batch.num_columns()), (2, 0));
 }
+
+#[test]
+fn direct_namespaced_fields_match_nested_paths_and_reject_duplicates() {
+    use arrow_schema::DataType::{Int64, Utf8};
+    use xml_arrow::{NamespaceBinding, XmlBatchBuilder, XmlField, XmlSchema};
+    let bindings = [NamespaceBinding {
+        prefix: "m",
+        uri: "urn:test",
+    }];
+    let schema = XmlSchema::with_namespaces(
+        vec![
+            XmlField::new("id", "@m:id", Int64, false),
+            XmlField::new("text", "m:text", Utf8, false),
+            XmlField::new("missing", "missing", Utf8, true),
+        ],
+        &bindings,
+    )
+    .unwrap();
+    let mut builder = XmlBatchBuilder::new(schema, 4).unwrap();
+    builder
+        .append_xml("<row xmlns:p='urn:test' p:id='42'><p:text>a<![CDATA[b]]>c</p:text></row>")
+        .unwrap();
+    let good = builder.len();
+    for invalid in [
+        "<row xmlns:p='urn:test' p:id='42'><p:text>a</p:text><p:text>b</p:text></row>",
+        "<row xmlns:p='urn:test' id='42'><p:text>a</p:text></row>",
+        "<row xmlns:p='urn:test' p:id='42'><text>a</text></row>",
+    ] {
+        assert!(builder.append_xml(invalid).is_err());
+        assert_eq!(builder.len(), good);
+    }
+    let batch = builder.flush().unwrap().unwrap();
+    let id = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<arrow_array::Int64Array>()
+        .unwrap();
+    let text = batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<arrow_array::StringArray>()
+        .unwrap();
+    assert_eq!(id.value(0), 42);
+    assert_eq!(text.value(0), "abc");
+    assert!(batch.column(2).is_null(0));
+}

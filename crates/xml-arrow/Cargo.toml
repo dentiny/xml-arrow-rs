@@ -31,3 +31,7 @@ path = "../../examples/infer.rs"
 [[example]]
 name = "stream"
 path = "../../examples/stream.rs"
+
+[[bench]]
+name = "conversion"
+harness = false
