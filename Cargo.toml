@@ -3,7 +3,7 @@ members = ["crates/xml-arrow", "crates/xml-io"]
 resolver = "2"
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/dentiny/xml-arrow-rs"
@@ -21,4 +21,4 @@ futures-executor = "0.3"
 url = "2"
 tokio = { version = "1", features = ["fs", "macros", "rt"] }
 tempfile = "3"
-xml-arrow = { path = "crates/xml-arrow", version = "0.2.1" }
+xml-arrow = { path = "crates/xml-arrow", version = "0.2.2" }
