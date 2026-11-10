@@ -28,6 +28,16 @@ pub(crate) fn parse<'a>(document: &'a Document<'_>, schema: &XmlSchema) -> Resul
         .collect()
 }
 
+fn resolve_name<'a>(
+    name: &'a str,
+    namespaces: &'a HashMap<String, String>,
+) -> (Option<&'a str>, &'a str) {
+    match name.split_once(':') {
+        Some((prefix, local)) => (Some(namespaces[prefix].as_str()), local),
+        None => (None, name),
+    }
+}
+
 fn extract<'a>(
     root: Node<'a, '_>,
     field: &XmlField,
@@ -43,10 +53,7 @@ fn extract<'a>(
         }
         let attribute = part.strip_prefix('@');
         let name = attribute.unwrap_or(part);
-        let (uri, local) = match name.split_once(':') {
-            Some((prefix, local)) => (Some(namespaces[prefix].as_str()), local),
-            None => (None, name),
-        };
+        let (uri, local) = resolve_name(name, namespaces);
         if attribute.is_some() {
             return match current.attributes().find(|attr| {
                 attr.namespace().filter(|uri| !uri.is_empty()) == uri && attr.name() == local
@@ -168,10 +175,7 @@ fn select<'a, 'input>(
         }
         let attribute = part.strip_prefix('@');
         let name = attribute.unwrap_or(part);
-        let (uri, local) = match name.split_once(':') {
-            Some((prefix, local)) => (Some(namespaces[prefix].as_str()), local),
-            None => (None, name),
-        };
+        let (uri, local) = resolve_name(name, namespaces);
         if attribute.is_some() {
             return nodes
                 .iter()
