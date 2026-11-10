@@ -76,4 +76,7 @@ pub use batch::XmlBatchBuilder;
 pub use error::{Error, Result};
 pub use schema::{NamespaceBinding, XmlField, XmlSchema};
 
-pub use reader::{InferenceOptions, Limit, ReadError, ReaderOptions, ReaderResult, XmlReader};
+pub use reader::{
+    read_records, InferenceOptions, Limit, ReadError, ReaderOptions, ReaderResult, XmlReader,
+    XmlRecord,
+};

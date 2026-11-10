@@ -7,7 +7,8 @@ use futures_util::{
     stream, FutureExt, TryStreamExt,
 };
 use xml_arrow::{
-    Limit, NamespaceBinding, ReadError, ReaderOptions, XmlField, XmlReader, XmlSchema,
+    read_records, Limit, NamespaceBinding, ReadError, ReaderOptions, XmlBatchBuilder, XmlField,
+    XmlReader, XmlSchema,
 };
 
 fn schema() -> XmlSchema {
@@ -291,4 +292,34 @@ async fn skipped_content_is_not_reparsed() {
     let batch = reader.next_batch().await.unwrap().unwrap();
     assert_eq!(ids(&batch, 0), &[7]);
     assert!(reader.next_batch().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn raw_records_keep_namespace_context_and_offsets_without_converting_fields() {
+    let schema = XmlSchema::with_namespaces(
+        vec![
+            XmlField::new("id", "@id", Int64, false),
+            XmlField::new("name", "r:name", Utf8, false),
+        ],
+        &[NamespaceBinding {
+            prefix: "r",
+            uri: "urn:records",
+        }],
+    )
+    .unwrap();
+    let xml = "\u{FEFF}<r:rows xmlns:r='urn:records'><r:row id='not-an-integer'><r:name>東京</r:name></r:row><row xmlns='urn:other'/></r:rows>";
+    let mut records = read_records(
+        input(xml.as_bytes()),
+        schema.clone(),
+        "/r:rows/r:row",
+        ReaderOptions::default(),
+    )
+    .unwrap();
+    let record = records.try_next().await.unwrap().unwrap();
+    assert_eq!(record.byte_offset, xml.find("<r:row ").unwrap() as u64);
+    let mut builder = XmlBatchBuilder::new_projected(schema, 1, &[1]).unwrap();
+    builder.append_xml(&record.xml).unwrap();
+    let batch = builder.flush().unwrap().unwrap();
+    assert_eq!(batch["name"].as_string::<i32>().value(0), "東京");
+    assert!(records.try_next().await.unwrap().is_none());
 }
