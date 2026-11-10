@@ -139,20 +139,29 @@ impl XmlSchema {
         Arc::clone(&self.arrow)
     }
 
-    pub(crate) fn project(&self, projection: &[usize]) -> Result<Self> {
+    pub(crate) fn validate_projection(&self, projection: &[usize]) -> Result<()> {
         let mut seen = HashSet::new();
-        let mut fields = Vec::with_capacity(projection.len());
         for &index in projection {
-            let field = self.fields.get(index).ok_or_else(|| {
-                Error::Configuration(format!("projection index {index} is out of bounds"))
-            })?;
+            if index >= self.fields.len() {
+                return Err(Error::Configuration(format!(
+                    "projection index {index} is out of bounds"
+                )));
+            }
             if !seen.insert(index) {
                 return Err(Error::Configuration(format!(
                     "duplicate projection index {index}"
                 )));
             }
-            fields.push(field.clone());
         }
+        Ok(())
+    }
+
+    pub(crate) fn project(&self, projection: &[usize]) -> Result<Self> {
+        self.validate_projection(projection)?;
+        let fields = projection
+            .iter()
+            .map(|&index| self.fields[index].clone())
+            .collect();
         let arrow = Arc::new(self.arrow.project(projection)?);
         Ok(Self {
             fields,
