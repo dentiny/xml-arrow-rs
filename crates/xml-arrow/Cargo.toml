@@ -31,7 +31,3 @@ path = "../../examples/infer.rs"
 [[example]]
 name = "stream"
 path = "../../examples/stream.rs"
-
-[[example]]
-name = "bench_lists"
-path = "../../examples/bench_lists.rs"
