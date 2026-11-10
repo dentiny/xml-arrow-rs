@@ -10,15 +10,11 @@ pub(crate) fn append(builder: &mut dyn ArrayBuilder, field: &XmlField, value: Va
     let valid = !matches!(value, Value::Null);
     macro_rules! scalar {
         ($builder:ty, $variant:ident) => {
-            builder
-                .as_any_mut()
-                .downcast_mut::<$builder>()
-                .unwrap()
-                .append_option(match value {
-                    Value::Null => None,
-                    Value::$variant(value) => Some(value),
-                    _ => unreachable!("parsed values match the validated schema"),
-                })
+            typed_mut::<$builder>(builder).append_option(match value {
+                Value::Null => None,
+                Value::$variant(value) => Some(value),
+                _ => unreachable!("parsed values match the validated schema"),
+            })
         };
     }
     match field.field.data_type() {
@@ -27,10 +23,7 @@ pub(crate) fn append(builder: &mut dyn ArrayBuilder, field: &XmlField, value: Va
         DataType::Int64 => scalar!(Int64Builder, Integer),
         DataType::Float64 => scalar!(Float64Builder, Float),
         DataType::Struct(_) => {
-            let builder = builder
-                .as_any_mut()
-                .downcast_mut::<StructBuilder>()
-                .unwrap();
+            let builder = typed_mut::<StructBuilder>(builder);
             let mut values = match value {
                 Value::Struct(values) => values.into_iter(),
                 Value::Null => Vec::new().into_iter(),
@@ -46,10 +39,7 @@ pub(crate) fn append(builder: &mut dyn ArrayBuilder, field: &XmlField, value: Va
             builder.append(valid);
         }
         DataType::List(_) => {
-            let builder = builder
-                .as_any_mut()
-                .downcast_mut::<ListBuilder<Box<dyn ArrayBuilder>>>()
-                .unwrap();
+            let builder = typed_mut::<ListBuilder<Box<dyn ArrayBuilder>>>(builder);
             match value {
                 Value::List(values) => {
                     for value in values {
@@ -73,7 +63,7 @@ pub(crate) fn validate_capacity(
 ) -> Result<()> {
     match field.field.data_type() {
         DataType::Utf8 => {
-            let builder = builder.as_any().downcast_ref::<StringBuilder>().unwrap();
+            let builder = typed::<StringBuilder>(builder);
             let bytes = values
                 .iter()
                 .filter_map(|value| match value {
@@ -88,7 +78,7 @@ pub(crate) fn validate_capacity(
             }
         }
         DataType::Struct(_) => {
-            let builder = builder.as_any().downcast_ref::<StructBuilder>().unwrap();
+            let builder = typed::<StructBuilder>(builder);
             for (index, (builder, child)) in builder
                 .field_builders()
                 .iter()
@@ -115,10 +105,7 @@ pub(crate) fn validate_capacity(
             }
         }
         DataType::List(_) => {
-            let builder = builder
-                .as_any()
-                .downcast_ref::<ListBuilder<Box<dyn ArrayBuilder>>>()
-                .unwrap();
+            let builder = typed::<ListBuilder<Box<dyn ArrayBuilder>>>(builder);
             let children: Vec<_> = values
                 .iter()
                 .filter_map(|value| match value {
@@ -137,4 +124,19 @@ pub(crate) fn validate_capacity(
         _ => {}
     }
     Ok(())
+}
+
+// Builder types come from the same validated schema used to parse values.
+fn typed<T: ArrayBuilder>(builder: &dyn ArrayBuilder) -> &T {
+    builder
+        .as_any()
+        .downcast_ref()
+        .expect("builder type must match the XML schema")
+}
+
+fn typed_mut<T: ArrayBuilder>(builder: &mut dyn ArrayBuilder) -> &mut T {
+    builder
+        .as_any_mut()
+        .downcast_mut()
+        .expect("builder type must match the XML schema")
 }
