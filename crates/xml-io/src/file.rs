@@ -2,7 +2,7 @@
 
 use std::{borrow::Cow, io};
 
-use futures_util::{io::AsyncBufRead, TryStreamExt};
+use futures_util::io::AsyncBufRead;
 use opendal::{services::Fs, Operator};
 
 use crate::validation::{validate_local_path, validate_local_path_parts, validate_object_path};
@@ -62,8 +62,7 @@ impl XmlFile {
         Ok(operator
             .reader(&path)
             .await?
-            .into_bytes_stream(..)
-            .await?
-            .into_async_read())
+            .into_futures_async_read(..)
+            .await?)
     }
 }
