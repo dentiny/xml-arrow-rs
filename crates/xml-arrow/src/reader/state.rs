@@ -16,15 +16,10 @@ use super::{
     error::Result,
     inference::Inference,
     validation::{validate_inference, validate_reader},
-    InferenceOptions, Limit, Name, ReadError, ReaderOptions,
+    InferenceOptions, Limit, Name, ReadError, ReaderOptions, XmlRecord as Record,
 };
 
 const MAX_RETAINED_RECORD_BUFFER_BYTES: usize = 64 * 1024;
-
-struct Record {
-    xml: String,
-    byte_offset: u64,
-}
 
 struct Capture {
     writer: Writer<Vec<u8>>,
@@ -181,7 +176,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             })
     }
 
-    async fn next_record(&mut self, buffer: &mut Vec<u8>) -> Result<Option<Record>> {
+    pub(super) async fn next_record(&mut self, buffer: &mut Vec<u8>) -> Result<Option<Record>> {
         if self.reader.buffer_position() == 0 {
             // Expose all three BOM bytes together, even for one-byte inputs.
             let (prefix, input) = self.reader.get_mut().get_mut().get_mut().get_mut();
