@@ -181,12 +181,12 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             // Expose all three BOM bytes together, even for one-byte inputs.
             let (prefix, input) = self.reader.get_mut().get_mut().get_mut().get_mut();
             input
-                .take(3)
+                .take(/*limit=*/ 3)
                 .read_to_end(prefix.get_mut())
                 .await
                 .map_err(|source| ReadError::xml(prefix.get_ref().len() as u64, source))?;
             self.bom_bytes = if prefix.get_ref() == b"\xEF\xBB\xBF" {
-                3
+                3 // UTF-8 BOM length in bytes.
             } else {
                 0
             };
