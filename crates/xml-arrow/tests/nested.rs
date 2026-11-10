@@ -273,3 +273,48 @@ fn invalid_nested_values_leave_the_batch_reusable() {
     );
     assert_eq!(batch.column(1).as_list::<i32>().value_offsets(), &[0, 1, 1]);
 }
+
+#[test]
+fn direct_child_lists_match_general_selection_with_namespaces_and_nil_items() {
+    let bindings = [NamespaceBinding {
+        prefix: "n",
+        uri: "urn:items",
+    }];
+    let items = r#"<n:item>one</n:item><item>ignore</item><n:item xsi:nil="true"/><n:item/>"#;
+    let mut batches = Vec::new();
+    for (path, nested) in [("n:item", false), ("group/n:item", true)] {
+        let wrap = |items: &str| {
+            let content = if nested {
+                format!("<group>{items}</group>")
+            } else {
+                items.into()
+            };
+            format!(
+                r#"<r xmlns:n="urn:items" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">{content}</r>"#
+            )
+        };
+        let schema = XmlSchema::with_namespaces(
+            vec![XmlField::list(
+                "items",
+                ".",
+                false,
+                XmlField::new("item", path, Utf8, true),
+            )],
+            &bindings,
+        )
+        .unwrap();
+        let mut builder = XmlBatchBuilder::new(schema, 2).unwrap();
+        builder.append_xml(&wrap(items)).unwrap();
+        assert!(builder
+            .append_xml(&wrap("<n:item><invalid/></n:item>"))
+            .is_err());
+        let batch = builder.flush().unwrap().unwrap();
+        let list = batch.column(0).as_list::<i32>();
+        assert_eq!(
+            list.values().as_string::<i32>().iter().collect::<Vec<_>>(),
+            vec![Some("one"), None, Some("")]
+        );
+        batches.push(batch);
+    }
+    assert_eq!(batches[0].columns(), batches[1].columns());
+}

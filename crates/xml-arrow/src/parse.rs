@@ -109,6 +109,21 @@ fn read<'a>(
         DataType::List(_) => {
             reject_mixed_content(node, field)?;
             let item = &field.children[0];
+            if !item.path.contains('/') && !item.path.starts_with('@') && item.path != "." {
+                // Direct children are the common list mapping. Convert them as
+                // they are visited instead of staging a second Vec of Sources.
+                let (uri, local) = resolve_name(&item.path, namespaces);
+                return node
+                    .children()
+                    .filter(|child| {
+                        child.is_element()
+                            && child.tag_name().namespace().filter(|uri| !uri.is_empty()) == uri
+                            && child.tag_name().name() == local
+                    })
+                    .map(|child| read(Source::Element(child), item, namespaces))
+                    .collect::<Result<Vec<_>>>()
+                    .map(Value::List);
+            }
             Value::List(
                 select(node, &item.path, namespaces)
                     .into_iter()
