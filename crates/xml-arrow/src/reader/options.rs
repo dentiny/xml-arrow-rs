@@ -65,7 +65,7 @@ impl ReaderOptions {
         super::validation::validate_reader(schema, record_path, self)?;
         if let Some(indices) = &self.projection {
             schema
-                .project(indices)
+                .validate_projection(indices)
                 .map_err(super::ReadError::configuration)?;
         }
         Ok(())
