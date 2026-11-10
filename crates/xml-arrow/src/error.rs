@@ -1,18 +1,20 @@
-use std::fmt;
-
 /// Result with [`Error`].
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// XML-to-Arrow conversion error.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Invalid schema, path, or options.
+    #[error("invalid configuration: {0}")]
     Configuration(String),
     /// XML parsing error.
-    Xml(roxmltree::Error),
+    #[error("XML: {0}")]
+    Xml(#[from] roxmltree::Error),
     /// Unsupported XML feature.
+    #[error("unsupported XML: {0}")]
     UnsupportedXml(&'static str),
     /// Invalid or missing field value.
+    #[error("field {name:?} at {path:?}: {message}")]
     Field {
         /// Column name.
         name: String,
@@ -22,46 +24,9 @@ pub enum Error {
         message: String,
     },
     /// Flush before appending more rows.
+    #[error("batch is full; flush before appending")]
     BatchFull,
     /// Arrow error.
-    Arrow(arrow_schema::ArrowError),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Configuration(message) => write!(f, "invalid configuration: {message}"),
-            Self::Xml(source) => write!(f, "XML: {source}"),
-            Self::UnsupportedXml(message) => write!(f, "unsupported XML: {message}"),
-            Self::Field {
-                name,
-                path,
-                message,
-            } => write!(f, "field {name:?} at {path:?}: {message}"),
-            Self::BatchFull => f.write_str("batch is full; flush before appending"),
-            Self::Arrow(source) => write!(f, "Arrow: {source}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Xml(source) => Some(source),
-            Self::Arrow(source) => Some(source),
-            _ => None,
-        }
-    }
-}
-
-impl From<roxmltree::Error> for Error {
-    fn from(source: roxmltree::Error) -> Self {
-        Self::Xml(source)
-    }
-}
-
-impl From<arrow_schema::ArrowError> for Error {
-    fn from(source: arrow_schema::ArrowError) -> Self {
-        Self::Arrow(source)
-    }
+    #[error("Arrow: {0}")]
+    Arrow(#[from] arrow_schema::ArrowError),
 }
