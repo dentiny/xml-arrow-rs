@@ -3,7 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use arrow_schema::DataType;
 use roxmltree::Node;
 
-use crate::{parse::is_nil, Error, NamespaceBinding, Result, XmlField, XmlSchema};
+use crate::{
+    parse::{is_nil, trim_xml_whitespace},
+    Error, NamespaceBinding, Result, XmlField, XmlSchema,
+};
 
 // (Optional namespace URI, local name); attributes use "@name", text uses ".".
 type Name = (Option<String>, String);
@@ -249,14 +252,14 @@ fn element(node: Node<'_, '_>, record: bool) -> Result<Kind> {
         }
     }
     if children {
-        if !text.trim_matches([' ', '\t', '\r', '\n']).is_empty() {
+        if !trim_xml_whitespace(&text).is_empty() {
             return Err(Error::UnsupportedXml(
                 "cannot infer mixed text and child elements",
             ));
         }
     } else if fields.is_empty() {
         return Ok(scalar(&text));
-    } else if !text.trim_matches([' ', '\t', '\r', '\n']).is_empty() {
+    } else if !trim_xml_whitespace(&text).is_empty() {
         fields.insert(
             (None, ".".into()),
             Shape {
@@ -272,7 +275,7 @@ fn element(node: Node<'_, '_>, record: bool) -> Result<Kind> {
 }
 
 fn scalar(value: &str) -> Kind {
-    let value = value.trim_matches([' ', '\t', '\r', '\n']);
+    let value = trim_xml_whitespace(value);
     if value.is_empty() {
         return Kind::Empty;
     }

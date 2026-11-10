@@ -147,7 +147,7 @@ fn read<'a>(
 pub(crate) fn is_nil(node: Node<'_, '_>) -> std::result::Result<bool, &'static str> {
     match node
         .attribute(("http://www.w3.org/2001/XMLSchema-instance", "nil"))
-        .map(|value| value.trim_matches([' ', '\t', '\r', '\n']))
+        .map(trim_xml_whitespace)
     {
         Some("true" | "1") => {
             if node
@@ -210,13 +210,13 @@ fn null_value(field: &XmlField) -> Result<Value<'static>> {
     }
 }
 
+/// Trim XML's four whitespace characters, preserving other Unicode spaces.
+pub(crate) fn trim_xml_whitespace(value: &str) -> &str {
+    value.trim_matches([' ', '\t', '\r', '\n'])
+}
+
 fn has_text(node: Node<'_, '_>) -> bool {
-    node.is_text()
-        && !node
-            .text()
-            .unwrap_or_default()
-            .trim_matches([' ', '\t', '\r', '\n'])
-            .is_empty()
+    node.is_text() && !trim_xml_whitespace(node.text().unwrap_or_default()).is_empty()
 }
 
 fn reject_mixed_content(node: Node<'_, '_>, field: &XmlField) -> Result<()> {
@@ -230,7 +230,7 @@ fn reject_mixed_content(node: Node<'_, '_>, field: &XmlField) -> Result<()> {
 
 fn convert<'a>(field: &XmlField, value: Cow<'a, str>) -> Result<Value<'a>> {
     use arrow_schema::DataType;
-    let trimmed = value.trim_matches([' ', '\t', '\r', '\n']);
+    let trimmed = trim_xml_whitespace(&value);
     let invalid = || {
         field.error(format!(
             "expected {}, got {value:?}",
