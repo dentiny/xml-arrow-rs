@@ -80,7 +80,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
         bindings: &[NamespaceBinding<'_>],
         options: ReaderOptions,
         sampling: InferenceOptions,
-    ) -> Result<Self> {
+    ) -> Result<(Self, XmlSchema)> {
         validate_inference(&sampling)?;
         let schema =
             XmlSchema::with_namespaces(vec![], bindings).map_err(ReadError::configuration)?;
@@ -124,9 +124,28 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             inference.finish(bindings)
         }
         .map_err(ReadError::configuration)?;
-        state.builder = builder(schema, &options)?;
+        if let Some(projection) = &options.projection {
+            schema
+                .validate_projection(projection)
+                .map_err(ReadError::configuration)?;
+        }
         state.options = options;
-        Ok(state)
+        Ok((state, schema))
+    }
+
+    pub(super) fn with_schema(mut self, schema: XmlSchema) -> Result<Self> {
+        self.builder = builder(schema, &self.options)?;
+        Ok(self)
+    }
+
+    pub(super) async fn next_replay_record(
+        &mut self,
+        buffer: &mut Vec<u8>,
+    ) -> Result<Option<Record>> {
+        match self.pending.pop_front() {
+            Some(record) => Ok(Some(record)),
+            None => self.next_record(buffer).await,
+        }
     }
 
     pub(super) fn schema(&self) -> SchemaRef {
@@ -138,10 +157,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
         let mut bytes = 0usize;
         let mut last_offset = 0;
         while !self.builder.is_full() {
-            let record = match self.pending.pop_front() {
-                Some(record) => Some(record),
-                None => self.next_record(&mut buffer).await?,
-            };
+            let record = self.next_replay_record(&mut buffer).await?;
             let Some(record) = record else {
                 break;
             };

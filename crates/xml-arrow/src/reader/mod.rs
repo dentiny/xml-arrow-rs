@@ -54,15 +54,38 @@ pub fn read_records<'a, R: AsyncBufRead + Unpin + Send + 'a>(
         ..options
     };
     let state = ReaderState::new(input, schema, record_path, options)?;
-    Ok(
-        stream::try_unfold((state, Vec::new()), |(mut state, mut buffer)| async move {
-            Ok(state
-                .next_record(&mut buffer)
-                .await?
-                .map(|record| (record, (state, buffer))))
-        })
-        .boxed(),
-    )
+    Ok(record_stream(state))
+}
+
+/// Infer reusable XML mappings from a bounded sample, then replay every raw record.
+///
+/// The returned schema includes namespace bindings and all sampled fields, even
+/// when `options.projection` selects fewer columns. Sampled records and any byte-
+/// limit lookahead precede the unread input, preserving original byte offsets.
+/// Limits, sampling and document validation match [`XmlReader::infer`]; conversion
+/// is left to independent [`crate::XmlBatchBuilder`] instances.
+pub async fn infer_records<'a, R: AsyncBufRead + Unpin + Send + 'a>(
+    input: R,
+    record_path: &str,
+    bindings: &[NamespaceBinding<'_>],
+    options: ReaderOptions,
+    sampling: InferenceOptions,
+) -> Result<(XmlSchema, BoxStream<'a, Result<XmlRecord>>)> {
+    let (state, schema) =
+        ReaderState::infer(input, record_path, bindings, options, sampling).await?;
+    Ok((schema, record_stream(state)))
+}
+
+fn record_stream<'a, R: AsyncBufRead + Unpin + Send + 'a>(
+    state: ReaderState<R>,
+) -> BoxStream<'a, Result<XmlRecord>> {
+    stream::try_unfold((state, Vec::new()), |(mut state, mut buffer)| async move {
+        Ok(state
+            .next_replay_record(&mut buffer)
+            .await?
+            .map(|record| (record, (state, buffer))))
+    })
+    .boxed()
 }
 
 /// Reads XML records selected by an absolute path into Arrow batches.
@@ -97,9 +120,9 @@ impl<'a> XmlReader<'a> {
         options: ReaderOptions,
         sampling: InferenceOptions,
     ) -> Result<Self> {
-        Ok(Self::from_state(
-            ReaderState::infer(input, record_path, bindings, options, sampling).await?,
-        ))
+        let (state, schema) =
+            ReaderState::infer(input, record_path, bindings, options, sampling).await?;
+        Ok(Self::from_state(state.with_schema(schema)?))
     }
 
     fn from_state<R: AsyncBufRead + Unpin + Send + 'a>(state: ReaderState<R>) -> Self {

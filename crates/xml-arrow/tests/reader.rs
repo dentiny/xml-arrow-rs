@@ -323,3 +323,59 @@ async fn raw_records_keep_namespace_context_and_offsets_without_converting_field
     assert_eq!(batch["name"].as_string::<i32>().value(0), "東京");
     assert!(records.try_next().await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn inferred_raw_records_replay_sample_and_lookahead_with_original_offsets() {
+    let xml = "\u{FEFF}<r:rows xmlns:r='urn:records'><r:row id='1'><r:name>東京</r:name></r:row><r:row id='2'><r:name>two</r:name><r:late>ignored</r:late></r:row><r:row id='3'><r:name>three</r:name></r:row><broken>";
+    let bindings = [NamespaceBinding {
+        prefix: "r",
+        uri: "urn:records",
+    }];
+    let mut raw = read_records(
+        input(xml.as_bytes()),
+        XmlSchema::with_namespaces(vec![], &bindings).unwrap(),
+        "/r:rows/r:row",
+        ReaderOptions::default(),
+    )
+    .unwrap();
+    let first_bytes = raw.try_next().await.unwrap().unwrap().xml.len();
+    drop(raw);
+    for sampling in [
+        xml_arrow::InferenceOptions {
+            max_records: 1,
+            ..Default::default()
+        },
+        xml_arrow::InferenceOptions {
+            max_bytes: first_bytes + 1,
+            ..Default::default()
+        },
+    ] {
+        let (schema, mut records) = xml_arrow::infer_records(
+            input(xml.as_bytes()),
+            "/r:rows/r:row",
+            &bindings,
+            ReaderOptions {
+                projection: Some(vec![]),
+                ..Default::default()
+            },
+            sampling,
+        )
+        .await
+        .unwrap();
+        assert_eq!(schema.fields().len(), 2);
+        for (id, name) in [(1, "東京"), (2, "two"), (3, "three")] {
+            let record = records.try_next().await.unwrap().unwrap();
+            assert_eq!(
+                record.byte_offset,
+                xml.find(&format!("<r:row id='{id}'")).unwrap() as u64
+            );
+            let mut builder = XmlBatchBuilder::new(schema.clone(), 1).unwrap();
+            builder.append_xml(&record.xml).unwrap();
+            let batch = builder.flush().unwrap().unwrap();
+            assert_eq!(batch["@id"].as_primitive::<Int64Type>().value(0), id);
+            assert_eq!(batch["r:name"].as_string::<i32>().value(0), name);
+        }
+        assert!(records.try_next().await.is_err());
+        assert!(records.try_next().await.unwrap().is_none());
+    }
+}
