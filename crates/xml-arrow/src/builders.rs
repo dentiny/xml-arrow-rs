@@ -95,14 +95,23 @@ pub(crate) fn validate_capacity(
                 .zip(&field.children)
                 .enumerate()
             {
-                let children: Vec<_> = values
-                    .iter()
-                    .filter_map(|value| match value {
-                        Value::Struct(children) => Some(&children[index]),
-                        _ => None,
-                    })
-                    .collect();
-                validate_capacity(builder.as_ref(), child, &children)?;
+                // A single struct is the common row-validation path. Keep its
+                // child reference on the stack; lists still aggregate offsets
+                // across all their items before any builder is mutated.
+                if let [value] = values {
+                    if let Value::Struct(children) = value {
+                        validate_capacity(builder.as_ref(), child, &[&children[index]])?;
+                    }
+                } else {
+                    let children: Vec<_> = values
+                        .iter()
+                        .filter_map(|value| match value {
+                            Value::Struct(children) => Some(&children[index]),
+                            _ => None,
+                        })
+                        .collect();
+                    validate_capacity(builder.as_ref(), child, &children)?;
+                }
             }
         }
         DataType::List(_) => {
