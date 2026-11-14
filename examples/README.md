@@ -1,5 +1,14 @@
 # Rust examples
 
+Application dependencies for the 0.3 release series use Arrow 58:
+
+```toml
+[dependencies]
+xml-arrow = "0.3"
+xml-io = "0.3"
+arrow-schema = "58"
+```
+
 Run from the repository root:
 
 | Command | Demonstrates |

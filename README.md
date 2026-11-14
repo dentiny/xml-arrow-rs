@@ -14,7 +14,7 @@ Add the library and its companion types to your application:
 
 ```toml
 [dependencies]
-xml-arrow = "0.2"
+xml-arrow = "0.3"
 arrow-schema = "58"
 futures-util = { version = "0.3", features = ["io"] }
 futures-executor = "0.3"
@@ -71,7 +71,7 @@ To read a local `books.xml` with the same `/catalog/book` structure, also add
 these entries under `[dependencies]`:
 
 ```toml
-xml-io = "0.2"
+xml-io = "0.3"
 tokio = { version = "1", features = ["macros", "rt"] }
 ```
 
