@@ -9,8 +9,8 @@ license = "MIT"
 repository = "https://github.com/dentiny/xml-arrow-rs"
 
 [workspace.dependencies]
-arrow-array = "59.3.0"
-arrow-schema = "59.3.0"
+arrow-array = "58.4"
+arrow-schema = "58.4"
 roxmltree = "0.21"
 futures-util = { version = "0.3", default-features = false, features = ["std", "io", "async-await"] }
 quick-xml = { version = "0.41", default-features = false, features = ["async-tokio"] }

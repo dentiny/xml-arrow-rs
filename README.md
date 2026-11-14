@@ -15,7 +15,7 @@ Add the library and its companion types to your application:
 ```toml
 [dependencies]
 xml-arrow = "0.2"
-arrow-schema = "59.3.0"
+arrow-schema = "58.4"
 futures-util = { version = "0.3", features = ["io"] }
 futures-executor = "0.3"
 ```
