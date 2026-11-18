@@ -6,7 +6,13 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
-    groups:
-      arrow:
-        patterns:
-          - "arrow-*"
+    # Upgrade these related dependency families manually.
+    ignore:
+      - dependency-name: "arrow"
+      - dependency-name: "arrow-*"
+      - dependency-name: "parquet"
+      - dependency-name: "parquet-*"
+      - dependency-name: "lance"
+      - dependency-name: "lance-*"
+      - dependency-name: "datafusion"
+      - dependency-name: "datafusion-*"
