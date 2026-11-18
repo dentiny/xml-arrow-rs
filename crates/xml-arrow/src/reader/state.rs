@@ -6,7 +6,7 @@ use arrow_schema::SchemaRef;
 use futures_util::io::{AsyncBufRead, AsyncReadExt, Chain, Cursor, Take};
 use quick_xml::{
     events::{attributes::Attribute, BytesStart, Event},
-    name::{Namespace, PrefixDeclaration},
+    name::{Namespace, PrefixDeclaration, QName},
     reader::NsReader,
     Writer, XmlVersion,
 };
@@ -284,7 +284,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
                 let allowed = match &event {
                     Event::Text(text) => text
                         .as_ref()
-                        .iter()
+                        .bytes()
                         .all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n')),
                     Event::Decl(_) | Event::Comment(_) | Event::PI(_) => true,
                     _ => false,
@@ -336,8 +336,7 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
         let (namespace, local) = self.reader.resolver().resolve_element(start.name());
         let namespace = Option::<Namespace<'_>>::try_from(namespace)
             .map_err(|source| ReadError::xml(self.position(), source))?;
-        let local = std::str::from_utf8(local.as_ref())
-            .map_err(|source| ReadError::xml(self.position(), source))?;
+        let local = local.as_ref();
         let expected = self
             .path
             .get(self.stack.len())
@@ -347,9 +346,12 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
             // Do not rescan their inherited namespace URI for every element.
             let uri = namespace
                 .map(|uri| {
-                    Attribute::from((b"xmlns".as_slice(), uri.into_inner()))
-                        .normalized_value(XmlVersion::Implicit1_0)
-                        .map_err(|source| ReadError::xml(self.position(), source))
+                    Attribute {
+                        key: QName("xmlns"),
+                        value: uri.into_inner().into(),
+                    }
+                    .normalized_value(XmlVersion::Implicit1_0)
+                    .map_err(|source| ReadError::xml(self.position(), source))
                 })
                 .transpose()?
                 .filter(|uri| !uri.is_empty());
@@ -364,20 +366,21 @@ impl<R: AsyncBufRead + Unpin> ReaderState<R> {
     fn with_namespaces<'b>(&self, mut start: BytesStart<'b>) -> Result<BytesStart<'b>> {
         let keys = start
             .attributes()
-            .map(|attr| attr.map(|attr| attr.key.as_ref().to_vec()))
+            .map(|attr| attr.map(|attr| attr.key.as_ref().to_owned()))
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|source| ReadError::xml(self.position(), source))?;
         for (prefix, uri) in self.reader.resolver().bindings() {
             let key = match prefix {
-                PrefixDeclaration::Default => b"xmlns".to_vec(),
-                PrefixDeclaration::Named(prefix) => [b"xmlns:".as_slice(), prefix].concat(),
+                PrefixDeclaration::Default => "xmlns".to_owned(),
+                PrefixDeclaration::Named(prefix) => format!("xmlns:{prefix}"),
             };
             if !keys.contains(&key) {
                 // Escape quotes without changing existing XML references.
-                let value = std::str::from_utf8(uri.into_inner())
-                    .map_err(|source| ReadError::xml(self.position(), source))?
-                    .replace('"', "&quot;");
-                start.push_attribute((key.as_slice(), value.as_bytes()));
+                let value = uri.into_inner().replace('"', "&quot;");
+                start.push_attribute(Attribute {
+                    key: QName(&key),
+                    value: value.as_str().into(),
+                });
             }
         }
         Ok(start)

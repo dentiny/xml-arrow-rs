@@ -13,7 +13,7 @@ arrow-array = "58"
 arrow-schema = "58"
 roxmltree = "0.21"
 futures-util = { version = "0.3", default-features = false, features = ["std", "io", "async-await"] }
-quick-xml = { version = "0.41", default-features = false, features = ["async-tokio"] }
+quick-xml = { version = "0.42", default-features = false, features = ["async-tokio"] }
 tokio-util = { version = "0.7", default-features = false, features = ["compat"] }
 thiserror = "2"
 opendal = { version = "0.59.5", default-features = false, features = ["services-fs"] }
