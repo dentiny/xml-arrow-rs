@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0 - Unreleased
+
+- Upgrade Arrow dependencies to 59.2 so Arrow arrays and schemas are compatible with the Arrow 59 ecosystem.
+
 ## 0.3.2 - 2026-11-16
 
 - Release xml-arrow and xml-io 0.3.2 with matching internal dependency requirements.
