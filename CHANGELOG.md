@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 - Unreleased
+## 0.4.0 - 2026-11-25
 
 - Upgrade Arrow dependencies to 59.2 so Arrow arrays and schemas are compatible with the Arrow 59 ecosystem.
 
