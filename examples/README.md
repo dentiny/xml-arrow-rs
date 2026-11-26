@@ -1,12 +1,12 @@
 # Rust examples
 
-Application dependencies for the 0.3 release series use Arrow 58:
+Application dependencies for the 0.3 release series use Arrow 59:
 
 ```toml
 [dependencies]
-xml-arrow = "0.3"
-xml-io = "0.3"
-arrow-schema = "58"
+xml-arrow = "0.4"
+xml-io = "0.4"
+arrow-schema = "59.2.0"
 ```
 
 Run from the repository root:
